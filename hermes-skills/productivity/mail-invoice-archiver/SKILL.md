@@ -24,6 +24,20 @@ Use the shared runtime in `../../../skills/mail_invoice_archiver/scripts/cli.py`
 - `bash scripts/run-mail-invoice-archiver.sh report --month YYYY-MM --json`
 - `bash scripts/run-mail-invoice-archiver.sh deliver --month YYYY-MM --json`
 
+## Windows Env Setup
+
+- If the user chooses `env` on Windows, offer one of these exact snippets and wait for confirmation before rerunning `doctor`.
+
+```powershell
+$env:MAIL_INVOICE_ARCHIVER_EMAIL = "your-126@126.com"
+$env:MAIL_INVOICE_ARCHIVER_AUTH_CODE = "your-auth-code"
+```
+
+```cmd
+set MAIL_INVOICE_ARCHIVER_EMAIL=your-126@126.com
+set MAIL_INVOICE_ARCHIVER_AUTH_CODE=your-auth-code
+```
+
 ## Rules
 
 - In the first session after installation, ask the user which credential storage mode they want before doing anything else.

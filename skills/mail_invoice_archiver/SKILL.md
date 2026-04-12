@@ -28,6 +28,22 @@ metadata: {"openclaw":{"name":"mail_invoice_archiver","displayName":"Mail Invoic
    total amount, canonical invoice count, high-value invoices, duplicates, conflicts, and failures.
 8. Run `deliver --month YYYY-MM --json`, then attach the returned zip file in the current chat and paste the summary.
 
+## Windows Env Setup
+
+- If the user chooses `env` on Windows, offer one of these exact snippets and wait for confirmation before rerunning `doctor`.
+
+```powershell
+$env:MAIL_INVOICE_ARCHIVER_EMAIL = "your-126@126.com"
+$env:MAIL_INVOICE_ARCHIVER_AUTH_CODE = "your-auth-code"
+python "{baseDir}/scripts/cli.py" doctor --json
+```
+
+```cmd
+set MAIL_INVOICE_ARCHIVER_EMAIL=your-126@126.com
+set MAIL_INVOICE_ARCHIVER_AUTH_CODE=your-auth-code
+python "{baseDir}\scripts\cli.py" doctor --json
+```
+
 ## Rules
 
 - Prefer `system` auth on macOS and Windows, `env` on Linux, CI, or headless sessions, and `prompt` only when the user does not want to persist the secret anywhere.

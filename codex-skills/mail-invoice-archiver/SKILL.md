@@ -21,6 +21,20 @@ Use the shared runtime in `../../skills/mail_invoice_archiver/scripts/cli.py`. T
 8. Run `bash scripts/run-mail-invoice-archiver.sh report --month YYYY-MM --json` to summarize totals, duplicates, conflicts, and failures.
 9. Run `bash scripts/run-mail-invoice-archiver.sh deliver --month YYYY-MM --json`, then attach the returned zip file in the current chat and paste the summary.
 
+## Windows Env Setup
+
+- If the user chooses `env` on Windows, offer one of these exact snippets and wait for confirmation before rerunning `doctor`.
+
+```powershell
+$env:MAIL_INVOICE_ARCHIVER_EMAIL = "your-126@126.com"
+$env:MAIL_INVOICE_ARCHIVER_AUTH_CODE = "your-auth-code"
+```
+
+```cmd
+set MAIL_INVOICE_ARCHIVER_EMAIL=your-126@126.com
+set MAIL_INVOICE_ARCHIVER_AUTH_CODE=your-auth-code
+```
+
 ## Rules
 
 - Offer multiple auth modes on first use instead of assuming macOS Keychain:
