@@ -50,11 +50,12 @@ class IMAPMailbox:
             try:
                 conn = imaplib.IMAP4_SSL(host, self.config.imap_port)
                 conn.login(self.account, self.password)
-                imaplib.Commands["ID"] = "AUTH"
-                try:
-                    conn._simple_command("ID", self.config.imap_client_id)
-                except Exception:
-                    pass
+                if self.config.imap_send_id and self.config.imap_client_id:
+                    imaplib.Commands["ID"] = "AUTH"
+                    try:
+                        conn._simple_command("ID", self.config.imap_client_id)
+                    except Exception:
+                        pass
                 conn.select(self.folder, readonly=True)
                 self.connection = conn
                 self.connected_host = host

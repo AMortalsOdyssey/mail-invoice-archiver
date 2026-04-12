@@ -13,6 +13,11 @@ from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.auth import (
 )
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.archive import sanitize_filename
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.config import RuntimeConfig
+from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.providers import (
+    default_system_service_name,
+    get_mail_provider,
+    list_mail_providers,
+)
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.extractors import (
     amount_to_cents,
     extract_from_text,
@@ -109,6 +114,7 @@ class SetupTests(unittest.TestCase):
             config_path = Path(tmpdir) / "config.toml"
             result = run_setup(
                 config_path=config_path,
+                mail_provider="gmail",
                 provider="config",
                 email="demo@example.com",
                 secret="secret-123",
@@ -116,6 +122,8 @@ class SetupTests(unittest.TestCase):
             )
             self.assertTrue(result["setup_complete"])
             config = RuntimeConfig.load(config_path)
+            self.assertEqual(config.mail_provider, "gmail")
+            self.assertEqual(config.host_candidates, ["imap.gmail.com"])
             credentials = resolve_credentials(config)
             self.assertEqual(credentials.email, "demo@example.com")
             self.assertEqual(credentials.secret, "secret-123")
@@ -196,6 +204,73 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(payload["setup_required"])
         self.assertEqual(payload["config_path"], "/tmp/demo.toml")
         self.assertGreaterEqual(len(payload["available_auth_methods"]), 4)
+        self.assertGreaterEqual(len(payload["available_mail_providers"]), 4)
+
+
+class ProviderTests(unittest.TestCase):
+    def test_detects_163_from_email(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            config_path.write_text(
+                '\n'.join(
+                    [
+                        'mail_provider = "auto"',
+                        'archive_root = "/tmp/archive"',
+                        'imap_port = 993',
+                        '',
+                        '[auth]',
+                        'provider = "env"',
+                        'email = "demo@163.com"',
+                        'service = ""',
+                        'env_email_var = "TEST_MAIL_EMAIL"',
+                        'env_secret_var = "TEST_MAIL_SECRET"',
+                        'secret = ""',
+                        '',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            config = RuntimeConfig.load(config_path)
+        self.assertEqual(config.mail_provider, "163")
+        self.assertEqual(config.host_candidates, ["imap.163.com"])
+        self.assertTrue(config.imap_send_id)
+
+    def test_detects_gmail_from_email(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.toml"
+            config_path.write_text(
+                '\n'.join(
+                    [
+                        'mail_provider = "auto"',
+                        'archive_root = "/tmp/archive"',
+                        'imap_port = 993',
+                        '',
+                        '[auth]',
+                        'provider = "env"',
+                        'email = "demo@gmail.com"',
+                        'service = ""',
+                        'env_email_var = "TEST_MAIL_EMAIL"',
+                        'env_secret_var = "TEST_MAIL_SECRET"',
+                        'secret = ""',
+                        '',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            config = RuntimeConfig.load(config_path)
+        self.assertEqual(config.mail_provider, "gmail")
+        self.assertEqual(config.host_candidates, ["imap.gmail.com"])
+        self.assertFalse(config.imap_send_id)
+        self.assertEqual(config.keychain_service, default_system_service_name("gmail"))
+
+    def test_provider_list_includes_rollout_targets(self) -> None:
+        providers = list_mail_providers()
+        provider_ids = {item["id"] for item in providers}
+        self.assertIn("126", provider_ids)
+        self.assertIn("163", provider_ids)
+        self.assertIn("gmail", provider_ids)
+        gmail = get_mail_provider("gmail")
+        self.assertEqual(gmail.secret_label, "app password")
 
 
 if __name__ == "__main__":

@@ -8,14 +8,19 @@ from pathlib import Path
 from .auth import SetupRequiredError, resolve_credentials, setup_required_payload
 from .archive import build_report, list_month_messages, pack_month, run_doctor, sync_month
 from .config import RuntimeConfig, default_config_path
+from .providers import known_mail_provider_ids, list_mail_providers
 from .setup_wizard import run_setup
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Read 126 mail and archive invoice attachments.")
+    parser = argparse.ArgumentParser(description="Read supported mailbox providers and archive invoice attachments.")
     parser.add_argument("--config", type=Path, default=None, help="Optional TOML config path.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of human text.")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    providers = subparsers.add_parser("providers", help="List supported mailbox providers.")
+    providers.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    providers.set_defaults(handler=cmd_providers)
 
     doctor = subparsers.add_parser("doctor", help="Check credential storage, IMAP, and runtime settings.")
     doctor.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
@@ -23,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup = subparsers.add_parser("setup", help="Configure credential storage for the current machine.")
     setup.add_argument("--provider", choices=["system", "env", "config", "prompt"], default=None)
+    setup.add_argument("--mail-provider", choices=list(known_mail_provider_ids(include_auto=True)), default=None)
     setup.add_argument("--email", default=None)
     setup.add_argument("--secret", default=None)
     setup.add_argument("--service", default=None)
@@ -75,6 +81,10 @@ def resolve_runtime(config_path: Path | None, *, allow_missing_setup: bool = Fal
     return config, credentials.email, credentials.secret
 
 
+def cmd_providers(args: argparse.Namespace) -> dict[str, object]:
+    return {"providers": list_mail_providers()}
+
+
 def cmd_doctor(args: argparse.Namespace) -> dict[str, object]:
     try:
         config, account, password = resolve_runtime(args.config, allow_missing_setup=True)
@@ -86,6 +96,7 @@ def cmd_doctor(args: argparse.Namespace) -> dict[str, object]:
 def cmd_setup(args: argparse.Namespace) -> dict[str, object]:
     return run_setup(
         config_path=args.config,
+        mail_provider=args.mail_provider,
         provider=args.provider,
         email=args.email,
         secret=args.secret,

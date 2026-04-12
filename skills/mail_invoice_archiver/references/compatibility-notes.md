@@ -10,11 +10,16 @@
 - During the live test, the mailbox sent a new-device login alert, which confirms the login path was real.
 - The runtime now implements `system` auth with macOS Keychain on macOS and Windows Credential Manager on Windows.
 - The Windows Credential Manager path is implemented and covered by unit tests, but it was not live-tested in this macOS session.
+- 163 is implemented as a sibling provider to 126 because the Netease help flow and IMAP guidance are the same family, but 163 was not live-tested in this workspace.
+- Gmail is implemented as a separate provider with `imap.gmail.com` and an app-password secret model. That is the phase-one path for personal Gmail accounts; some Google Workspace tenants may still require OAuth or admin-side IMAP controls.
 
 ## Pitfalls
 
 - Do not assume `imap.126.com` is the best production host for every environment.
 - Do not assume macOS Keychain is the only acceptable secret store. The runtime now supports `system`, `env`, `config`, and `prompt` modes, and `system` now covers Windows Credential Manager too.
+- Do not assume all providers use the same secret type. 126 and 163 use authorization codes; Gmail requires an app password in the current runtime.
+- Do not assume all Gmail accounts behave the same. Personal Gmail can use app passwords, while some Google Workspace environments may still block this path without admin changes or OAuth.
+- Do not assume every provider needs the same IMAP handshake. The Apple Mail style `ID` is intentionally scoped to the Netease providers.
 - Do not rely on file names for invoice identity. Re-sent messages and alternate formats can represent the same invoice.
 - Do not assume OCR is always available. The runtime falls back to XML, PDF text, subject, and body extraction when OCR tools are missing.
 - Do not auto-merge invoices when the invoice number matches but the amount differs; flag them as conflicts.

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import RuntimeConfig, default_config_path
+from .providers import get_mail_provider, list_mail_providers
 from .system_credentials import read_system_secret, store_system_secret, system_store_spec
 
 
@@ -73,8 +74,9 @@ def setup_required_payload(config_path: Path | None = None) -> dict[str, object]
     return {
         "setup_required": True,
         "config_path": str(path),
+        "available_mail_providers": list_mail_providers(),
         "available_auth_methods": available_auth_methods(),
-        "next_step": "Run setup and ask the user which credential storage mode they want.",
+        "next_step": "Run setup and ask the user which mailbox provider and credential storage mode they want.",
     }
 
 
@@ -147,12 +149,13 @@ def _resolve_config_credentials(config: RuntimeConfig) -> ResolvedCredentials:
 def _resolve_prompt_credentials(config: RuntimeConfig) -> ResolvedCredentials:
     if not sys.stdin.isatty():
         raise RuntimeError("Prompt auth requires an interactive terminal")
-    email = config.email_address or input("126 email address: ").strip()
+    provider = get_mail_provider(config.mail_provider, config.email_address)
+    email = config.email_address or input(f"{provider.display_name} email address: ").strip()
     if not email:
         raise RuntimeError("Email address is required")
-    secret = getpass.getpass("126 authorization code: ").strip()
+    secret = getpass.getpass(f"{provider.display_name} {provider.secret_label}: ").strip()
     if not secret:
-        raise RuntimeError("Authorization code is required")
+        raise RuntimeError(f"{provider.secret_label.capitalize()} is required")
     return ResolvedCredentials(
         email=email,
         secret=secret,

@@ -21,6 +21,7 @@ from .extractors import (
 from .imap_client import IMAPMailbox
 from .index import ArchiveIndex
 from .models import AttachmentPayload, DeliveryResult, InvoiceMetadata, ParsedMessage, SyncResult
+from .providers import get_mail_provider
 
 
 def run_doctor(config: RuntimeConfig, account: str, password: str) -> dict[str, object]:
@@ -29,8 +30,11 @@ def run_doctor(config: RuntimeConfig, account: str, password: str) -> dict[str, 
     probe_month = datetime.now().strftime("%Y-%m")
     status = mailbox.month_status(probe_month)
     mailbox.close()
+    provider = get_mail_provider(config.mail_provider, config.email_address or account)
     return {
         "account": account,
+        "mail_provider": provider.id,
+        "mail_provider_label": provider.display_name,
         "selected_host": host,
         "selected_folder": folder,
         "probe_month": probe_month,
