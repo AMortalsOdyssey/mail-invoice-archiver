@@ -15,7 +15,10 @@ from .config import RuntimeConfig
 from .models import AttachmentPayload, InvoiceMetadata, ParsedMessage
 
 AMOUNT_PATTERNS = [
-    re.compile(r"(?:发票金额|合计金额|金额|价税合计)[:：]?\s*[¥￥]?\s*([0-9]+(?:\.[0-9]{1,2})?)"),
+    re.compile(r"价税合计（小写）\s*[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)"),
+    re.compile(r"价税合计\(小写\)\s*[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)"),
+    re.compile(r"(?:发票金额|合计金额|金额)[:：]?\s*[¥￥]?\s*([0-9]+(?:\.[0-9]{1,2})?)"),
+    re.compile(r"[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)"),
 ]
 INVOICE_NUMBER_PATTERNS = [
     re.compile(r"发票号码[:：]?\s*([0-9]{8,20})"),
@@ -29,7 +32,8 @@ DATE_PATTERNS = [
     re.compile(r"开票时间[:：]?\s*([0-9]{4}[/-][0-9]{1,2}[/-][0-9]{1,2})"),
 ]
 VENDOR_PATTERNS = [
-    re.compile(r"(?:开票方|销方名称)[:：]?\s*([^\s，,；;]+(?:有限公司|事务所|餐饮发展有限公司|餐饮有限公司)?)"),
+    re.compile(r"(?:开票方|销方名称)[:：]?\s*([^\n\r\s，,；;]+(?:有限公司|事务所|餐饮发展有限公司|餐饮有限公司|酒店))"),
+    re.compile(r"名称[:：]?\s*名称[:：]?[\s\S]*?\n\s*[^\n\r]+\n\s*[^\n\r]+\n\s*([^\n\r]+?(?:有限公司|事务所|餐饮发展有限公司|餐饮有限公司|酒店))\n", re.S),
 ]
 URL_PATTERN = re.compile(r"https?://[^\s<>\"]+")
 
@@ -103,6 +107,8 @@ def extract_invoice_metadata(
             metadata = message_metadata.merge(filename_metadata).merge(extract_from_xml(attachment.data))
         elif attachment.extension == "pdf":
             metadata = extract_from_pdf(attachment.data).merge(filename_metadata).merge(message_metadata)
+        elif attachment.extension == "ofd":
+            metadata = extract_from_ofd(attachment.data).merge(filename_metadata).merge(message_metadata)
         elif attachment.extension in {"png", "jpg", "jpeg"}:
             metadata = extract_from_image(attachment.data, attachment.extension).merge(filename_metadata).merge(
                 message_metadata
@@ -119,10 +125,39 @@ def extract_from_text(text: str, source: str) -> InvoiceMetadata:
     amount_text = _first_match(AMOUNT_PATTERNS, text)
     metadata.amount_cents = amount_to_cents(amount_text)
     metadata.invoice_date = _first_match(DATE_PATTERNS, text)
-    metadata.vendor = _first_match(VENDOR_PATTERNS, text)
+    metadata.vendor = extract_vendor(text)
     if metadata.invoice_number or metadata.amount_cents is not None:
         metadata.confidence = "medium"
     return metadata
+
+
+def extract_vendor(text: str) -> str | None:
+    layout_vendor = _extract_vendor_from_invoice_layout(text)
+    if layout_vendor:
+        return layout_vendor
+    return _first_match(VENDOR_PATTERNS, text)
+
+
+def _extract_vendor_from_invoice_layout(text: str) -> str | None:
+    normalized = text.replace('\r', '')
+    marker = '名称： 名称：'
+    idx = normalized.find(marker)
+    if idx == -1:
+        return None
+    tail = normalized[idx + len(marker):]
+    lines = [line.strip() for line in tail.split('\n')]
+    candidates = [line for line in lines if line]
+    if len(candidates) < 4:
+        return None
+    for i in range(len(candidates) - 3):
+        buyer_name, buyer_tax, seller_name, seller_tax = candidates[i : i + 4]
+        if not _looks_like_tax_id(buyer_tax):
+            continue
+        if not _looks_like_tax_id(seller_tax):
+            continue
+        if seller_name and _looks_like_vendor_name(seller_name):
+            return seller_name
+    return None
 
 
 def extract_from_xml(data: bytes) -> InvoiceMetadata:
@@ -146,8 +181,85 @@ def extract_from_pdf(data: bytes) -> InvoiceMetadata:
     except Exception:
         return InvoiceMetadata(extraction_sources=["pdf-read-failed"])
     metadata = extract_from_text(text, source="pdf-text")
+    pdf_amount = extract_pdf_invoice_total(text)
+    if pdf_amount is not None:
+        metadata.amount_cents = pdf_amount
     if metadata.invoice_number or metadata.amount_cents is not None:
         metadata.confidence = "high"
+        return metadata
+    ocr_metadata = extract_pdf_via_ocr(data)
+    return ocr_metadata.merge(metadata)
+
+
+def extract_pdf_invoice_total(text: str) -> int | None:
+    normalized = text.replace('\r', '')
+    marker = '价税合计'
+    idx = normalized.find(marker)
+    window = normalized[idx: idx + 300] if idx != -1 else normalized
+    amounts = re.findall(r'[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)', window)
+    if amounts:
+        return amount_to_cents(amounts[-1])
+    return None
+
+
+def extract_from_ofd(data: bytes) -> InvoiceMetadata:
+    try:
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            text_chunks: list[str] = []
+            for name in zf.namelist():
+                lower = name.lower()
+                if not lower.endswith('.xml'):
+                    continue
+                try:
+                    raw = zf.read(name)
+                except Exception:
+                    continue
+                xml_meta = extract_from_xml(raw)
+                text_chunks.extend([v for v in [xml_meta.invoice_number, xml_meta.invoice_code, xml_meta.invoice_date, xml_meta.vendor] if v])
+                if xml_meta.amount_cents is not None:
+                    text_chunks.append(f"金额 {xml_meta.amount_cents / 100:.2f}")
+                try:
+                    root = ET.fromstring(raw)
+                    text_chunks.append(" ".join((element.text or "") for element in root.iter()))
+                except Exception:
+                    pass
+    except Exception:
+        return InvoiceMetadata(extraction_sources=["ofd-read-failed"])
+    text = " ".join(chunk for chunk in text_chunks if chunk)
+    metadata = extract_from_text(text, source="ofd-xml")
+    if metadata.invoice_number or metadata.amount_cents is not None:
+        metadata.confidence = "high"
+    return metadata
+
+
+def extract_pdf_via_ocr(data: bytes) -> InvoiceMetadata:
+    tesseract = shutil.which("tesseract")
+    ocrmypdf = shutil.which("ocrmypdf")
+    if not tesseract or not ocrmypdf:
+        return InvoiceMetadata(extraction_sources=["pdf-ocr-unavailable"])
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        return InvoiceMetadata(extraction_sources=["pdf-missing-pypdf"])
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = Path(tmpdir) / "input.pdf"
+        output_path = Path(tmpdir) / "ocr.pdf"
+        input_path.write_bytes(data)
+        try:
+            subprocess.run(
+                [ocrmypdf, "--skip-text", "--force-ocr", str(input_path), str(output_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            reader = PdfReader(str(output_path))
+            text = " ".join(page.extract_text() or "" for page in reader.pages)
+        except Exception:
+            return InvoiceMetadata(extraction_sources=["pdf-ocr-failed"])
+    metadata = extract_from_text(text, source="pdf-ocr")
+    if metadata.invoice_number or metadata.amount_cents is not None:
+        metadata.confidence = "medium"
     return metadata
 
 
@@ -199,3 +311,15 @@ def _first_match(patterns: Iterable[re.Pattern[str]], text: str) -> str | None:
         if match:
             return match.group(1).strip()
     return None
+
+
+def _looks_like_tax_id(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text or "")
+    return bool(re.fullmatch(r"[0-9A-Z]{15,20}", compact))
+
+
+def _looks_like_vendor_name(text: str) -> bool:
+    value = (text or '').strip()
+    if not value or value in {'名称：', '名称'}:
+        return False
+    return any(token in value for token in ['公司', '事务所', '酒店', '餐饮'])

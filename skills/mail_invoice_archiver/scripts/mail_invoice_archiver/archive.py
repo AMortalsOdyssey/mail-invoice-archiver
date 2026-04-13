@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import shutil
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime
 from pathlib import Path
+import subprocess
 
 from .config import RuntimeConfig
 from .extractors import (
@@ -94,17 +96,17 @@ def sync_month(
             result.scanned_messages += 1
             if not probable_invoice_message(message, config):
                 continue
+
+            candidates: list[AttachmentPayload] = []
             for attachment in message.attachments:
-                if not probable_invoice_attachment(attachment, message, config):
-                    continue
-                status = _store_attachment(config, index, month, message, attachment)
-                _apply_status(result, status)
+                if probable_invoice_attachment(attachment, message, config):
+                    candidates.append(attachment)
+
             if follow_links:
                 for url in extract_urls(message, config):
                     downloaded = _download_link_if_invoice_like(url)
                     if isinstance(downloaded, AttachmentPayload):
-                        status = _store_attachment(config, index, month, message, downloaded)
-                        _apply_status(result, status)
+                        candidates.append(downloaded)
                     elif downloaded:
                         result.link_failures += 1
                         result.failures += 1
@@ -129,6 +131,10 @@ def sync_month(
                             duplicate_of_id=None,
                             failure_reason=str(downloaded),
                         )
+
+            for chosen in _select_best_attachments_for_message(message, candidates):
+                status = _store_attachment(config, index, month, message, chosen)
+                _apply_status(result, status)
     finally:
         mailbox.close()
         index.close()
@@ -228,12 +234,76 @@ def _store_attachment(
     metadata = extract_invoice_metadata(message, attachment)
     content_sha = sha256_bytes(attachment.data)
     business_key = infer_business_key(metadata, content_sha)
-    extension = attachment.extension
+    extension = attachment.extension.lower()
+
+    final_attachment = attachment
+    final_extension = extension
+    generated_from_ofd = False
+
+    if extension == "zip":
+        artifact_id = index.insert_artifact(
+            account=message.account,
+            folder=message.folder,
+            message_uid=message.uid,
+            part_ref=attachment.part_ref,
+            source_kind=attachment.source_kind,
+            source_ref=attachment.source_ref or attachment.filename,
+            received_at=message.received_at.isoformat() if message.received_at else None,
+            sender=message.sender,
+            subject=message.subject,
+            preview=message.preview,
+            local_path=None,
+            sha256=content_sha,
+            mime_type=attachment.content_type,
+            extension=extension,
+            metadata=metadata,
+            business_key=business_key,
+            status="duplicate",
+            duplicate_of_id=index.find_canonical(business_key)["id"] if index.find_canonical(business_key) else None,
+        )
+        return {"status": "duplicate", "id": artifact_id, "local_path": None}
+
+    if extension == "ofd":
+        converted = _convert_ofd_attachment_to_pdf(attachment)
+        if converted is not None:
+            final_attachment = converted
+            final_extension = "pdf"
+            generated_from_ofd = True
 
     if metadata.invoice_number:
         same_number = index.find_same_invoice_number(metadata.invoice_number)
         for row in same_number:
             if row["amount_cents"] == metadata.amount_cents and metadata.amount_cents is not None:
+                existing_score = _attachment_preference_score((row["extension"] or "").lower())
+                incoming_score = _attachment_preference_score(final_extension)
+                if incoming_score > existing_score:
+                    old_local_path = row["local_path"]
+                    local_path = _write_artifact(config, month, message, final_attachment)
+                    artifact_id = index.insert_artifact(
+                        account=message.account,
+                        folder=message.folder,
+                        message_uid=message.uid,
+                        part_ref=attachment.part_ref,
+                        source_kind=attachment.source_kind,
+                        source_ref=attachment.source_ref or attachment.filename,
+                        received_at=message.received_at.isoformat() if message.received_at else None,
+                        sender=message.sender,
+                        subject=message.subject,
+                        preview=message.preview,
+                        local_path=str(local_path),
+                        sha256=sha256_bytes(final_attachment.data),
+                        mime_type=final_attachment.content_type,
+                        extension=final_extension,
+                        metadata=metadata,
+                        business_key=business_key,
+                        status="saved",
+                        duplicate_of_id=None,
+                    )
+                    index.demote_artifact_to_duplicate(int(row["id"]), artifact_id)
+                    if old_local_path:
+                        _remove_file_if_exists(Path(old_local_path))
+                    return {"status": "saved", "id": artifact_id, "local_path": str(local_path), "generated_from_ofd": generated_from_ofd}
+
                 artifact_id = index.insert_artifact(
                     account=message.account,
                     folder=message.folder,
@@ -256,7 +326,7 @@ def _store_attachment(
                 )
                 return {"status": "duplicate", "id": artifact_id, "local_path": None}
         if same_number and any(row["amount_cents"] != metadata.amount_cents for row in same_number):
-            local_path = _write_artifact(config, month, message, attachment)
+            local_path = _write_artifact(config, month, message, final_attachment)
             artifact_id = index.insert_artifact(
                 account=message.account,
                 folder=message.folder,
@@ -269,19 +339,49 @@ def _store_attachment(
                 subject=message.subject,
                 preview=message.preview,
                 local_path=str(local_path),
-                sha256=content_sha,
-                mime_type=attachment.content_type,
-                extension=extension,
+                sha256=sha256_bytes(final_attachment.data),
+                mime_type=final_attachment.content_type,
+                extension=final_extension,
                 metadata=metadata,
                 business_key=business_key,
                 status="conflict",
                 duplicate_of_id=None,
                 failure_reason="same invoice number with different amount",
             )
-            return {"status": "conflict", "id": artifact_id, "local_path": str(local_path)}
+            return {"status": "conflict", "id": artifact_id, "local_path": str(local_path), "generated_from_ofd": generated_from_ofd}
 
     existing = index.find_canonical(business_key)
     if existing:
+        existing_score = _attachment_preference_score((existing["extension"] or "").lower())
+        incoming_score = _attachment_preference_score(final_extension)
+        if incoming_score > existing_score:
+            old_local_path = existing["local_path"]
+            local_path = _write_artifact(config, month, message, final_attachment)
+            artifact_id = index.insert_artifact(
+                account=message.account,
+                folder=message.folder,
+                message_uid=message.uid,
+                part_ref=attachment.part_ref,
+                source_kind=attachment.source_kind,
+                source_ref=attachment.source_ref or attachment.filename,
+                received_at=message.received_at.isoformat() if message.received_at else None,
+                sender=message.sender,
+                subject=message.subject,
+                preview=message.preview,
+                local_path=str(local_path),
+                sha256=sha256_bytes(final_attachment.data),
+                mime_type=final_attachment.content_type,
+                extension=final_extension,
+                metadata=metadata,
+                business_key=business_key,
+                status="saved",
+                duplicate_of_id=None,
+            )
+            index.demote_artifact_to_duplicate(int(existing["id"]), artifact_id)
+            if old_local_path:
+                _remove_file_if_exists(Path(old_local_path))
+            return {"status": "saved", "id": artifact_id, "local_path": str(local_path), "generated_from_ofd": generated_from_ofd}
+
         artifact_id = index.insert_artifact(
             account=message.account,
             folder=message.folder,
@@ -304,7 +404,7 @@ def _store_attachment(
         )
         return {"status": "duplicate", "id": artifact_id, "local_path": None}
 
-    local_path = _write_artifact(config, month, message, attachment)
+    local_path = _write_artifact(config, month, message, final_attachment)
     artifact_id = index.insert_artifact(
         account=message.account,
         folder=message.folder,
@@ -317,15 +417,15 @@ def _store_attachment(
         subject=message.subject,
         preview=message.preview,
         local_path=str(local_path),
-        sha256=content_sha,
-        mime_type=attachment.content_type,
-        extension=extension,
+        sha256=sha256_bytes(final_attachment.data),
+        mime_type=final_attachment.content_type,
+        extension=final_extension,
         metadata=metadata,
         business_key=business_key,
         status="saved",
         duplicate_of_id=None,
     )
-    return {"status": "saved", "id": artifact_id, "local_path": str(local_path)}
+    return {"status": "saved", "id": artifact_id, "local_path": str(local_path), "generated_from_ofd": generated_from_ofd}
 
 
 def _write_artifact(
@@ -347,6 +447,105 @@ def _write_artifact(
 def sanitize_filename(name: str) -> str:
     sanitized = "".join(ch if ch.isalnum() or ch in {"-", "_", ".", "(", ")", " "} else "_" for ch in name)
     return sanitized.strip() or "attachment.bin"
+
+
+def _attachment_preference_score(extension: str) -> int:
+    ext = (extension or "").lower()
+    return {
+        "png": 5,
+        "jpg": 5,
+        "jpeg": 5,
+        "pdf": 4,
+        "xml": 3,
+        "ofd": 2,
+        "zip": 1,
+    }.get(ext, 0)
+
+
+def _select_best_attachments_for_message(
+    message: ParsedMessage,
+    attachments: list[AttachmentPayload],
+) -> list[AttachmentPayload]:
+    grouped: dict[str, tuple[InvoiceMetadata, AttachmentPayload]] = {}
+    fallbacks: list[tuple[InvoiceMetadata, AttachmentPayload]] = []
+
+    for attachment in attachments:
+        metadata = extract_invoice_metadata(message, attachment)
+        content_sha = sha256_bytes(attachment.data)
+        business_key = infer_business_key(metadata, content_sha)
+        current = grouped.get(business_key)
+        if current is None:
+            grouped[business_key] = (metadata, attachment)
+            continue
+        _, existing_attachment = current
+        if _attachment_preference_score(attachment.extension) > _attachment_preference_score(existing_attachment.extension):
+            grouped[business_key] = (metadata, attachment)
+
+    chosen: list[AttachmentPayload] = []
+    for metadata, attachment in grouped.values():
+        ext = attachment.extension.lower()
+        if ext == 'zip':
+            continue
+        if ext == 'ofd':
+            pdf_exists = any(
+                other_meta.invoice_number == metadata.invoice_number
+                and other_att.extension.lower() == 'pdf'
+                and metadata.invoice_number is not None
+                for other_meta, other_att in grouped.values()
+            )
+            if pdf_exists:
+                continue
+        chosen.append(attachment)
+    return chosen
+
+
+def _maybe_generate_pdf_from_ofd(local_path: Path) -> Path | None:
+    if local_path.suffix.lower() != ".ofd":
+        return None
+    soffice = shutil.which("soffice")
+    libreoffice = shutil.which("libreoffice")
+    converter = soffice or libreoffice
+    if not converter:
+        return None
+    try:
+        subprocess.run(
+            [converter, "--headless", "--convert-to", "pdf", "--outdir", str(local_path.parent), str(local_path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60,
+        )
+    except Exception:
+        return None
+    pdf_path = local_path.with_suffix(".pdf")
+    return pdf_path if pdf_path.exists() else None
+
+
+def _convert_ofd_attachment_to_pdf(attachment: AttachmentPayload) -> AttachmentPayload | None:
+    if attachment.extension.lower() != "ofd":
+        return None
+    with tempfile.TemporaryDirectory() as tmpdir:
+        source = Path(tmpdir) / sanitize_filename(attachment.filename)
+        source.write_bytes(attachment.data)
+        pdf_path = _maybe_generate_pdf_from_ofd(source)
+        if pdf_path is None or not pdf_path.exists():
+            return None
+        return AttachmentPayload(
+            part_ref=attachment.part_ref,
+            filename=Path(attachment.filename).with_suffix('.pdf').name,
+            content_type='application/pdf',
+            data=pdf_path.read_bytes(),
+            source_kind=attachment.source_kind,
+            source_ref=attachment.source_ref,
+        )
+
+
+def _remove_file_if_exists(path: Path) -> None:
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception:
+        pass
 
 
 def cents_to_currency(amount_cents: int | None) -> str:

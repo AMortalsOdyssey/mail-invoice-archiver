@@ -21,8 +21,10 @@ from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.providers import
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.extractors import (
     amount_to_cents,
     extract_from_text,
+    extract_pdf_invoice_total,
     infer_business_key,
 )
+from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.feishu_delivery import load_feishu_config
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.index import ArchiveIndex
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.models import InvoiceMetadata
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.setup_wizard import run_setup
@@ -43,6 +45,25 @@ class ExtractorTests(unittest.TestCase):
         self.assertEqual(amount_to_cents("213.00"), 21300)
         self.assertEqual(amount_to_cents("1,288.50"), 128850)
         self.assertIsNone(amount_to_cents(None))
+
+    def test_extract_vendor_from_collapsed_layout(self) -> None:
+        text = (
+            "名称： 名称：\n"
+            "广东天习律师事务所\n"
+            "91440101ABCDEFG12\n"
+            "广州宝园阁餐饮有限公司\n"
+            "91440101HIJKLMN34\n"
+        )
+        metadata = extract_from_text(text, source="unit-test")
+        self.assertEqual(metadata.vendor, "广州宝园阁餐饮有限公司")
+
+    def test_extract_pdf_invoice_total_prefers_total_area(self) -> None:
+        text = (
+            "项目 A ¥232.08 税额 ¥13.92 "
+            "价税合计（小写） ¥246.00 "
+            "其他字段"
+        )
+        self.assertEqual(extract_pdf_invoice_total(text), 24600)
 
     def test_business_key_prefers_invoice_number_and_amount(self) -> None:
         metadata = InvoiceMetadata(invoice_number="1234567890", amount_cents=5000)
@@ -105,6 +126,57 @@ class IndexTests(unittest.TestCase):
             self.assertEqual(summary["canonical_count"], 1)
             self.assertEqual(summary["duplicate_count"], 1)
             self.assertEqual(summary["total_amount_cents"], 1000)
+            index.close()
+
+    def test_month_summary_includes_current_month_duplicate_of_older_canonical(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = RuntimeConfig(archive_root=Path(tmpdir))
+            index = ArchiveIndex(cfg.database_path)
+            metadata = InvoiceMetadata(invoice_number="222", amount_cents=90000, extraction_sources=["unit"])
+            saved_id = index.insert_artifact(
+                account="a@b.com",
+                folder="INBOX",
+                message_uid="1",
+                part_ref="part-1",
+                source_kind="attachment",
+                source_ref="march.pdf",
+                received_at="2026-03-28T11:27:07+08:00",
+                sender="sender",
+                subject="subject",
+                preview="preview",
+                local_path="/tmp/march.pdf",
+                sha256="sha-march",
+                mime_type="application/pdf",
+                extension="pdf",
+                metadata=metadata,
+                business_key="invoice:222:90000",
+                status="saved",
+                duplicate_of_id=None,
+            )
+            index.insert_artifact(
+                account="a@b.com",
+                folder="INBOX",
+                message_uid="2",
+                part_ref="part-1",
+                source_kind="attachment",
+                source_ref="april.pdf",
+                received_at="2026-04-02T11:27:07+08:00",
+                sender="sender",
+                subject="subject",
+                preview="preview",
+                local_path=None,
+                sha256="sha-april",
+                mime_type="application/pdf",
+                extension="pdf",
+                metadata=metadata,
+                business_key="invoice:222:90000",
+                status="duplicate",
+                duplicate_of_id=saved_id,
+            )
+            summary = index.month_summary("2026-04", 1000)
+            self.assertEqual(summary["canonical_count"], 1)
+            self.assertEqual(summary["duplicate_count"], 1)
+            self.assertEqual(summary["total_amount_cents"], 90000)
             index.close()
 
 
@@ -205,6 +277,38 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(payload["config_path"], "/tmp/demo.toml")
         self.assertGreaterEqual(len(payload["available_auth_methods"]), 4)
         self.assertGreaterEqual(len(payload["available_mail_providers"]), 4)
+
+
+class DeliveryConfigTests(unittest.TestCase):
+    def test_load_feishu_config_prefers_env(self) -> None:
+        old = {
+            "MAIL_INVOICE_ARCHIVER_FEISHU_APP_ID": os.environ.get("MAIL_INVOICE_ARCHIVER_FEISHU_APP_ID"),
+            "MAIL_INVOICE_ARCHIVER_FEISHU_APP_SECRET": os.environ.get("MAIL_INVOICE_ARCHIVER_FEISHU_APP_SECRET"),
+            "MAIL_INVOICE_ARCHIVER_FEISHU_RECEIVE_ID_TYPE": os.environ.get("MAIL_INVOICE_ARCHIVER_FEISHU_RECEIVE_ID_TYPE"),
+        }
+        try:
+            os.environ["MAIL_INVOICE_ARCHIVER_FEISHU_APP_ID"] = "cli_demo"
+            os.environ["MAIL_INVOICE_ARCHIVER_FEISHU_APP_SECRET"] = "secret_demo"
+            os.environ["MAIL_INVOICE_ARCHIVER_FEISHU_RECEIVE_ID_TYPE"] = "chat_id"
+            config = load_feishu_config(Path("/tmp/nonexistent-skill-root"))
+            self.assertEqual(config["app_id"], "cli_demo")
+            self.assertEqual(config["app_secret"], "secret_demo")
+            self.assertEqual(config["receive_id_type"], "chat_id")
+        finally:
+            for key, value in old.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_load_feishu_config_rejects_in_skill_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_root = Path(tmpdir)
+            config_dir = skill_root / "config" / "feishu"
+            config_dir.mkdir(parents=True)
+            (config_dir / "config.yaml").write_text("feishu:\n  app_id: test\n", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                load_feishu_config(skill_root)
 
 
 class ProviderTests(unittest.TestCase):

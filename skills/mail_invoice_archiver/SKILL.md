@@ -63,8 +63,48 @@ python "{baseDir}\scripts\cli.py" doctor --json
 - If invoice number matches but amount differs, keep the file and report it as a conflict instead of auto-merging.
 - Keep invoice amount and OCR results in SQLite metadata, not in file names.
 - If a link download fails and the message still looks like an invoice, report that failure back to the user.
+- When the same invoice appears in multiple attachment formats in one mail, prefer user-friendly formats for the canonical saved file. Default priority should be: **image (png/jpg/jpeg) or PDF first**, then XML, then OFD, and ZIP last. Do not prefer OFD or ZIP when a readable PDF or image version of the same invoice is available.
+- Treat OFD as a fallback archival format, not the default user-facing format, unless it is the only available canonical representation.
+- For PDF invoice amount extraction, do not blindly take the first `¥` amount. PDF text extraction may reorder the invoice area and expose tax base amount, tax amount, and total amount in the wrong sequence.
+- For PDF invoices, prefer a dedicated total-amount extractor over generic regex fallback. Use the invoice total area first, then fall back only when that area is missing.
+- Buyer and seller names in PDF invoices may collapse into repeated `名称： 名称：` layouts after text extraction. Prefer layout-aware extraction over a single regex when distinguishing buyer and seller.
+- Month summaries must be stable even when a current-month row is marked as `duplicate` against an older canonical row outside the month window. Summaries should aggregate by current-month business keys, not only by `status='saved'` rows inside the month.
+- If the user specifies a business rule for a specific invoice family, such as using `价税合计` for totals, record and honor that rule consistently in later extraction and reporting.
 
 ## Resources
 
 - Runtime: [scripts/cli.py](scripts/cli.py)
 - Detailed findings and pitfalls: [references/compatibility-notes.md](references/compatibility-notes.md)
+- Feishu local config example: [config/feishu/config.example.yaml](config/feishu/config.example.yaml)
+
+## Local Secret Config Convention
+
+When this skill needs Feishu app credentials for local delivery helpers or follow-up integrations, do not store real secrets inside the published skill directory.
+
+Use this split instead:
+
+- committed example inside the skill: `config/feishu/config.example.yaml`
+- local real config outside the skill: `~/.config/openclaw/mail_invoice_archiver/feishu.config.yaml`
+
+Why this rule exists:
+
+- `.gitignore` reduces Git commit risk, but should not be treated as the security boundary for skill publishing.
+- Publishing flows may not behave exactly like Git, so real secrets must live outside the skill folder.
+- The skill should only ship examples, docs, and secret-loading logic, never the real credential file.
+
+Recommended loading order for Feishu credentials:
+
+1. explicit environment variables
+2. local private config at `~/.config/openclaw/mail_invoice_archiver/feishu.config.yaml`
+3. prompt the user
+
+Environment variable names:
+
+- `MAIL_INVOICE_ARCHIVER_FEISHU_APP_ID`
+- `MAIL_INVOICE_ARCHIVER_FEISHU_APP_SECRET`
+- `MAIL_INVOICE_ARCHIVER_FEISHU_RECEIVE_ID_TYPE`
+- optional override path: `MAIL_INVOICE_ARCHIVER_FEISHU_CONFIG`
+
+Never publish or share the real local config file.
+
+If `config/feishu/config.yaml` appears inside the skill directory, treat it as an unsafe misconfiguration. The runtime should fail fast and require moving that file out of the skill.

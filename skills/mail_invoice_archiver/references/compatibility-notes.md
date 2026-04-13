@@ -1,5 +1,30 @@
 # Compatibility Notes
 
+## 2026-04 Attachment format preference lesson
+
+A real-world invoice mail may include the same invoice in several attachment forms at once, for example:
+
+- OFD
+- PDF
+- ZIP
+- sometimes image attachments
+
+For user-facing archive output, OFD is often the least convenient option because many users do not routinely open, print, or inspect OFD files. In this workflow, canonical file selection should prefer formats the user can open immediately.
+
+Recommended priority for canonical saved artifacts:
+
+1. image (`png` / `jpg` / `jpeg`)
+2. `pdf`
+3. `xml`
+4. `ofd`
+5. `zip`
+
+Practical rule:
+
+- If PDF or image exists for the same invoice, do not save OFD as the default canonical artifact.
+- Keep OFD or ZIP only as fallback or supplemental material when no more accessible format exists.
+- This preference is about user-facing archive convenience, not about extraction confidence alone.
+
 ## Real-World Findings
 
 - 126 mailbox IMAP worked with a Keychain-stored authorization code.
@@ -24,3 +49,17 @@
 - Do not assume OCR is always available. The runtime falls back to XML, PDF text, subject, and body extraction when OCR tools are missing.
 - Do not auto-merge invoices when the invoice number matches but the amount differs; flag them as conflicts.
 - Do not treat chat delivery as SMTP. The runtime only prepares the zip and summary; the agent layer must attach the zip in the current chat.
+- Do not assume PDF text extraction preserves visual order. In real invoice PDFs, `价税合计（大写）` and `（小写）` labels may be separated from the actual amounts by many unrelated lines after text extraction.
+- Do not grab the first `¥` amount in a PDF invoice region. In the tested restaurant invoices, the first `¥` was the tax base amount, the second was tax amount, and the last was the final invoice total.
+- Do not treat buyer and seller labels as a simple nearest-neighbor regex problem. In tested PDFs, `名称： 名称：` collapsed into one line, and the actual buyer/seller values appeared several lines later in fixed positional order.
+- Do not let month summary logic depend only on current-month rows with `status='saved'`. A current-month artifact may be marked `duplicate` against an older canonical row from a previous run, and the summary still needs to count that business key for the current month.
+
+## 2026-04 Repair Notes
+
+During live repair on 2026-04 invoice data, the following issues were reproduced and fixed:
+
+1. Homebrew Python 3.14 loaded `pyexpat` against `/usr/lib/libexpat.1.dylib`, which broke XML parsing. The working recovery path was: repoint the library, then re-sign the touched Python artifacts so macOS would load them again.
+2. PDF vendor extraction initially captured the buyer (`广东天习律师事务所`) instead of the seller. The reliable fix was to switch from plain regex matching to layout-aware extraction that understands the buyer/seller block after `名称： 名称：`.
+3. PDF amount extraction initially captured tax-base amounts such as `232.08` and `198.11` because the generic fallback matched the first `¥` in a reordered text block. The fix was to add a dedicated PDF total extractor that inspects the invoice total area first.
+4. Month report totals became unstable when current-month rows were duplicates of older canonical rows created in previous runs. The fix was to summarize by current-month `business_key`, selecting the best representative row from the current month instead of requiring a current-month `saved` row.
+5. One invoice family required an explicit business rule choice for total amount interpretation. When the user confirms a reporting rule such as using `价税合计 = 900.00`, persist that interpretation consistently in extraction and reporting.

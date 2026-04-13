@@ -9,6 +9,22 @@ from pathlib import Path
 from .models import InvoiceMetadata
 
 
+def _canonical_score(row: sqlite3.Row) -> tuple[int, int, int, int]:
+    status_score = 2 if row["status"] == "saved" and row["duplicate_of_id"] is None else 1 if row["status"] in {"saved", "conflict"} else 0
+    extension = (row["extension"] or "").lower()
+    extension_score = {
+        "png": 5,
+        "jpg": 5,
+        "jpeg": 5,
+        "pdf": 4,
+        "xml": 3,
+        "ofd": 2,
+        "zip": 1,
+    }.get(extension, 0)
+    metadata_score = sum(1 for key in ["invoice_number", "amount_cents", "invoice_date", "vendor"] if row[key] not in (None, ""))
+    return (status_score, extension_score, metadata_score, -int(row["id"]))
+
+
 class ArchiveIndex:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
@@ -60,15 +76,23 @@ class ArchiveIndex:
         self.conn.commit()
 
     def find_canonical(self, business_key: str) -> sqlite3.Row | None:
-        return self.conn.execute(
-            """
-            SELECT * FROM artifacts
-            WHERE business_key = ? AND status IN ('saved', 'conflict') AND duplicate_of_id IS NULL
-            ORDER BY id ASC
-            LIMIT 1
-            """,
-            (business_key,),
-        ).fetchone()
+        rows = list(
+            self.conn.execute(
+                """
+                SELECT * FROM artifacts
+                WHERE business_key = ? AND status IN ('saved', 'conflict') AND duplicate_of_id IS NULL
+                ORDER BY id ASC
+                """,
+                (business_key,),
+            ).fetchall()
+        )
+        if not rows:
+            return None
+        best = rows[0]
+        for row in rows[1:]:
+            if _canonical_score(row) > _canonical_score(best):
+                best = row
+        return best
 
     def find_same_invoice_number(self, invoice_number: str) -> list[sqlite3.Row]:
         return list(
@@ -81,6 +105,28 @@ class ArchiveIndex:
                 (invoice_number,),
             ).fetchall()
         )
+
+    def demote_artifact_to_duplicate(self, artifact_id: int, duplicate_of_id: int) -> None:
+        self.conn.execute(
+            """
+            UPDATE artifacts
+            SET status = 'duplicate', duplicate_of_id = ?, local_path = NULL
+            WHERE id = ?
+            """,
+            (duplicate_of_id, artifact_id),
+        )
+        self.conn.commit()
+
+    def update_artifact_path_and_extension(self, artifact_id: int, local_path: str, extension: str, mime_type: str, sha256: str) -> None:
+        self.conn.execute(
+            """
+            UPDATE artifacts
+            SET local_path = ?, extension = ?, mime_type = ?, sha256 = ?, status = 'saved', duplicate_of_id = NULL
+            WHERE id = ?
+            """,
+            (local_path, extension, mime_type, sha256, artifact_id),
+        )
+        self.conn.commit()
 
     def insert_artifact(
         self,
@@ -161,10 +207,26 @@ class ArchiveIndex:
 
     def month_summary(self, month: str, high_value_threshold: int) -> dict[str, object]:
         rows = self.month_rows(month)
-        canonical = [row for row in rows if row["status"] == "saved" and row["duplicate_of_id"] is None]
         duplicates = [row for row in rows if row["status"] == "duplicate"]
         failures = [row for row in rows if row["status"] == "failed"]
         conflicts = [row for row in rows if row["status"] == "conflict"]
+
+        canonical_by_business_key: dict[str, sqlite3.Row] = {}
+        for row in rows:
+            if row["status"] == "failed":
+                continue
+            business_key = row["business_key"]
+            current = canonical_by_business_key.get(business_key)
+            if current is None:
+                canonical_by_business_key[business_key] = row
+                continue
+            current_score = _canonical_score(current)
+            row_score = _canonical_score(row)
+            if row_score > current_score or (row_score == current_score and row["id"] < current["id"]):
+                canonical_by_business_key[business_key] = row
+
+        canonical = list(canonical_by_business_key.values())
+        canonical.sort(key=lambda row: ((row["received_at"] or ""), row["id"]))
         unknown_amount = [row for row in canonical if row["amount_cents"] is None]
         total_amount_cents = sum(row["amount_cents"] or 0 for row in canonical)
         high_value = [row for row in canonical if (row["amount_cents"] or 0) >= high_value_threshold * 100]

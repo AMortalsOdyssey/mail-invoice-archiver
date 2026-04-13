@@ -148,6 +148,27 @@ python skills/mail_invoice_archiver/scripts/cli.py report --month 2026-04 --json
 python skills/mail_invoice_archiver/scripts/cli.py deliver --month 2026-04 --json
 ```
 
+## Attachment Preference And OCR Notes
+
+- When the same invoice appears in several formats in one message, the archive now prefers user-friendly canonical artifacts in this order:
+  image (`png` / `jpg` / `jpeg`), then `pdf`, then `xml`, then `ofd`, and `zip` last.
+- OFD is treated as a fallback archival format. If a readable PDF can be derived or is already present, the runtime avoids making OFD the default saved artifact.
+- PDF extraction now prefers the invoice total area over the first visible currency value, and falls back to OCR when direct text extraction is not reliable and OCR tooling is available.
+
+## Optional Feishu Delivery Helper
+
+- The shared runtime now includes an optional Feishu helper in `skills/mail_invoice_archiver/scripts/mail_invoice_archiver/feishu_delivery.py`.
+- Do not place real Feishu secrets inside the published skill directory.
+- Commit only the example file:
+  `skills/mail_invoice_archiver/config/feishu/config.example.yaml`
+- Keep real local config outside the repo and outside the published skill:
+  `~/.config/openclaw/mail_invoice_archiver/feishu.config.yaml`
+- Supported environment variables:
+  `MAIL_INVOICE_ARCHIVER_FEISHU_APP_ID`,
+  `MAIL_INVOICE_ARCHIVER_FEISHU_APP_SECRET`,
+  `MAIL_INVOICE_ARCHIVER_FEISHU_RECEIVE_ID_TYPE`,
+  and optional `MAIL_INVOICE_ARCHIVER_FEISHU_CONFIG`
+
 ## Notes
 
 - The runtime prefers provider-specific defaults instead of one global IMAP host list.
@@ -167,4 +188,5 @@ python -m unittest discover -s tests -v
 ## Security
 
 - Do not commit your local config, auth code, exported archives, or runtime database.
-- `.gitignore` already excludes local config files, ZIP exports, SQLite files, PEM keys, and archive output.
+- `.gitignore` already excludes local config files, ZIP exports, SQLite files, PEM keys, archive output, and the in-skill Feishu secret path.
+- `skills/mail_invoice_archiver/.openclawignore` also blocks accidental upload of `config/feishu/config.yaml` if someone misplaces secrets inside the skill directory.
