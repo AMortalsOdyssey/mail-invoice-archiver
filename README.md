@@ -5,14 +5,14 @@ Cross-platform AI skill for syncing invoice emails from supported mailbox provid
 ## What This Repo Contains
 
 - OpenClaw-compatible skill source in `skills/mail_invoice_archiver/`
-- Codex wrapper in `codex-skills/mail-invoice-archiver/`
+- Self-contained Codex skill in `codex-skills/mail-invoice-archiver/`
 - Hermes wrapper in `hermes-skills/productivity/mail-invoice-archiver/`
 - Shared Python runtime for IMAP sync, metadata extraction, dedupe, report generation, and delivery bundle preparation
 - Unit tests for extraction, dedupe, setup flow, and Windows system-credential advertising
 
 ## Repository Layout
 
-The skill is organized as one shared runtime plus thin wrappers for each host agent.
+The skill is organized as one shared runtime plus host-agent entry points. The Codex entry point vendors the runtime under its own directory so GitHub skill installation can target one directory.
 
 ```text
 mail-invoice-archiver/
@@ -32,6 +32,9 @@ mail-invoice-archiver/
 ├── codex-skills/
 │   └── mail-invoice-archiver/
 │       ├── SKILL.md
+│       ├── runtime/
+│       │   ├── references/
+│       │   └── scripts/
 │       └── agents/
 │           └── openai.yaml
 ├── hermes-skills/
@@ -45,7 +48,7 @@ mail-invoice-archiver/
 - `skills/mail_invoice_archiver/`
   The real skill source and shared runtime. New mailbox providers, archive logic, OCR, dedupe, and packaging behavior should land here first.
 - `codex-skills/mail-invoice-archiver/`
-  Codex-facing wrapper. It keeps the skill discoverable in Codex while reusing the shared runtime.
+  Codex-facing, self-contained skill. Install this single directory into Codex; its `runtime/` copy keeps the wrapper usable after GitHub skill installation.
 - `hermes-skills/productivity/mail-invoice-archiver/`
   Hermes-facing wrapper. It points Hermes to the same shared runtime and usage rules.
 - `tests/`
@@ -54,8 +57,18 @@ mail-invoice-archiver/
 In practice, this means:
 
 - OpenClaw is the source-of-truth skill shape.
-- Codex and Hermes are adapter layers.
+- Codex vendors the runtime for one-directory installation; Hermes is an adapter layer.
 - Business logic should stay in the shared Python runtime, not be duplicated across wrappers.
+
+## Codex Install
+
+Install the Codex skill from the single self-contained directory:
+
+```bash
+python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py --repo AMortalsOdyssey/mail-invoice-archiver --path codex-skills/mail-invoice-archiver
+```
+
+After installation, Codex should show one skill: `mail-invoice-archiver`.
 
 ## Requirements
 

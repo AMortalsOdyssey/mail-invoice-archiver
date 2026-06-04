@@ -2,4 +2,4 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-python3 "$SCRIPT_DIR/../../../skills/mail_invoice_archiver/scripts/cli.py" "$@"
+python3 "$SCRIPT_DIR/../runtime/scripts/cli.py" "$@"

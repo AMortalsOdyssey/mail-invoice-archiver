@@ -7,7 +7,7 @@ description: Read supported mailbox providers such as 126, 163, and Gmail with a
 
 ## Overview
 
-Use the shared runtime in `../../skills/mail_invoice_archiver/scripts/cli.py`. This Codex wrapper keeps the skill discoverable in hyphen-case while reusing the OpenClaw-compatible implementation.
+Use the bundled runtime in `runtime/scripts/cli.py`. This skill keeps one Codex-facing name (`mail-invoice-archiver`) while storing the implementation under its own internal runtime directory.
 
 ## Workflow
 
@@ -52,4 +52,4 @@ set MAIL_INVOICE_ARCHIVER_AUTH_CODE=your-provider-secret
 
 ## References
 
-- Shared runtime notes: [../../skills/mail_invoice_archiver/references/compatibility-notes.md](../../skills/mail_invoice_archiver/references/compatibility-notes.md)
+- Runtime notes: [runtime/references/compatibility-notes.md](runtime/references/compatibility-notes.md)
