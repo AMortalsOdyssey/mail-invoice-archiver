@@ -35,7 +35,7 @@ class AttachmentPayload:
     filename: str
     content_type: str
     data: bytes
-    source_kind: str = "attachment"
+    source_kind: str = "webmail-download"
     source_ref: str | None = None
 
     @property
@@ -59,15 +59,16 @@ class ParsedMessage:
 
 
 @dataclass(slots=True)
-class SyncResult:
+class ImportResult:
     month: str
-    scanned_messages: int = 0
-    canonical_saved: int = 0
+    scanned_files: int = 0
+    imported: int = 0
     duplicates: int = 0
     conflicts: int = 0
+    skipped: int = 0
     failures: int = 0
-    link_failures: int = 0
     saved_paths: list[str] = field(default_factory=list)
+    skipped_paths: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

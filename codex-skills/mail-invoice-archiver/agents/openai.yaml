@@ -1,4 +1,4 @@
 interface:
   display_name: "Mail Invoice Archiver"
-  short_description: "Read invoice mail from 126, 163, or Gmail"
-  default_prompt: "Use $mail-invoice-archiver to read invoice email from supported providers like 126, 163, or Gmail, archive it by month, and prepare reports."
+  short_description: "Organize invoices downloaded from webmail"
+  default_prompt: "Use $mail-invoice-archiver to collect invoices from the mailbox web UI, import downloaded invoice files, deduplicate them, and prepare monthly summaries."

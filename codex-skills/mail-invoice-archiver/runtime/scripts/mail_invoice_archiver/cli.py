@@ -5,51 +5,34 @@ import json
 import sys
 from pathlib import Path
 
-from .auth import SetupRequiredError, resolve_credentials, setup_required_payload
-from .archive import build_report, list_month_messages, pack_month, run_doctor, sync_month
-from .config import RuntimeConfig, default_config_path
-from .providers import known_mail_provider_ids, list_mail_providers
-from .setup_wizard import run_setup
+from .archive import build_report, import_files, pack_month, run_doctor, webmail_checklist
+from .config import RuntimeConfig
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Read supported mailbox providers and archive invoice attachments.")
+    parser = argparse.ArgumentParser(
+        description="Organize invoice files downloaded from the mailbox web UI."
+    )
     parser.add_argument("--config", type=Path, default=None, help="Optional TOML config path.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of human text.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    providers = subparsers.add_parser("providers", help="List supported mailbox providers.")
-    providers.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
-    providers.set_defaults(handler=cmd_providers)
-
-    doctor = subparsers.add_parser("doctor", help="Check credential storage, IMAP, and runtime settings.")
+    doctor = subparsers.add_parser("doctor", help="Check local archive tooling and paths.")
     doctor.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
     doctor.set_defaults(handler=cmd_doctor)
 
-    setup = subparsers.add_parser("setup", help="Configure credential storage for the current machine.")
-    setup.add_argument("--provider", choices=["system", "env", "config", "prompt"], default=None)
-    setup.add_argument("--mail-provider", choices=list(known_mail_provider_ids(include_auto=True)), default=None)
-    setup.add_argument("--email", default=None)
-    setup.add_argument("--secret", default=None)
-    setup.add_argument("--service", default=None)
-    setup.add_argument("--env-email-var", default=None)
-    setup.add_argument("--env-secret-var", default=None)
-    setup.add_argument("--non-interactive", action="store_true")
-    setup.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
-    setup.set_defaults(handler=cmd_setup)
+    checklist = subparsers.add_parser("checklist", help="Emit the browser/webmail search checklist.")
+    checklist.add_argument("--from-month", default=None)
+    checklist.add_argument("--to-month", default=None)
+    checklist.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    checklist.set_defaults(handler=cmd_checklist)
 
-    lst = subparsers.add_parser("list", help="List month messages without downloading attachments.")
-    lst.add_argument("--month", required=True)
-    lst.add_argument("--limit", type=int, default=None)
-    lst.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
-    lst.set_defaults(handler=cmd_list)
-
-    sync = subparsers.add_parser("sync", help="Download likely invoice attachments for a month.")
-    sync.add_argument("--month", required=True)
-    sync.add_argument("--limit", type=int, default=None)
-    sync.add_argument("--no-follow-links", action="store_true")
-    sync.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
-    sync.set_defaults(handler=cmd_sync)
+    import_cmd = subparsers.add_parser("import-files", help="Import files downloaded from webmail.")
+    import_cmd.add_argument("--month", required=True)
+    import_cmd.add_argument("--source-dir", type=Path, required=True)
+    import_cmd.add_argument("--no-recursive", action="store_true")
+    import_cmd.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
+    import_cmd.set_defaults(handler=cmd_import_files)
 
     report = subparsers.add_parser("report", help="Build a month summary from the local index.")
     report.add_argument("--month", required=True)
@@ -68,80 +51,44 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_runtime(config_path: Path | None, *, allow_missing_setup: bool = False) -> tuple[RuntimeConfig, str, str]:
-    path = config_path or default_config_path()
-    if not path.exists():
-        if allow_missing_setup:
-            raise SetupRequiredError(path)
-        raise SetupRequiredError(path)
-    config = RuntimeConfig.load(path)
-    credentials = resolve_credentials(config, config_path=path)
-    if not config.email_address:
-        config.email_address = credentials.email
-    return config, credentials.email, credentials.secret
-
-
-def cmd_providers(args: argparse.Namespace) -> dict[str, object]:
-    return {"providers": list_mail_providers()}
+def _config(args: argparse.Namespace) -> RuntimeConfig:
+    return RuntimeConfig.load(args.config)
 
 
 def cmd_doctor(args: argparse.Namespace) -> dict[str, object]:
-    try:
-        config, account, password = resolve_runtime(args.config, allow_missing_setup=True)
-    except SetupRequiredError as exc:
-        return setup_required_payload(exc.config_path)
-    return run_doctor(config, account, password)
+    return run_doctor(_config(args))
 
 
-def cmd_setup(args: argparse.Namespace) -> dict[str, object]:
-    return run_setup(
-        config_path=args.config,
-        mail_provider=args.mail_provider,
-        provider=args.provider,
-        email=args.email,
-        secret=args.secret,
-        service=args.service,
-        env_email_var=args.env_email_var,
-        env_secret_var=args.env_secret_var,
-        interactive=not args.non_interactive,
-    )
+def cmd_checklist(args: argparse.Namespace) -> dict[str, object]:
+    return webmail_checklist(args.from_month, args.to_month)
 
 
-def cmd_list(args: argparse.Namespace) -> list[dict[str, object]]:
-    config, account, password = resolve_runtime(args.config)
-    return list_month_messages(config, account, password, args.month, limit=args.limit)
-
-
-def cmd_sync(args: argparse.Namespace) -> dict[str, object]:
-    config, account, password = resolve_runtime(args.config)
-    result = sync_month(
-        config,
-        account,
-        password,
+def cmd_import_files(args: argparse.Namespace) -> dict[str, object]:
+    result = import_files(
+        _config(args),
         args.month,
-        limit=args.limit,
-        follow_links=not args.no_follow_links,
+        args.source_dir,
+        recursive=not args.no_recursive,
     )
     return {
         "month": result.month,
-        "scanned_messages": result.scanned_messages,
-        "canonical_saved": result.canonical_saved,
+        "scanned_files": result.scanned_files,
+        "imported": result.imported,
         "duplicates": result.duplicates,
         "conflicts": result.conflicts,
+        "skipped": result.skipped,
         "failures": result.failures,
-        "link_failures": result.link_failures,
         "saved_paths": result.saved_paths,
+        "skipped_paths": result.skipped_paths,
     }
 
 
 def cmd_report(args: argparse.Namespace) -> dict[str, object]:
-    config = RuntimeConfig.load(args.config)
-    return build_report(config, args.month)
+    return build_report(_config(args), args.month)
 
 
 def cmd_pack(args: argparse.Namespace) -> dict[str, object]:
-    config = RuntimeConfig.load(args.config)
-    result = pack_month(config, args.month)
+    result = pack_month(_config(args), args.month)
     return {
         "month": result.month,
         "zip_path": result.zip_path,
@@ -151,7 +98,7 @@ def cmd_pack(args: argparse.Namespace) -> dict[str, object]:
 
 
 def cmd_deliver(args: argparse.Namespace) -> dict[str, object]:
-    config = RuntimeConfig.load(args.config)
+    config = _config(args)
     result = pack_month(config, args.month)
     return {
         "month": result.month,
@@ -161,7 +108,7 @@ def cmd_deliver(args: argparse.Namespace) -> dict[str, object]:
         "summary_json_path": result.summary_json_path,
         "instructions": (
             "Attach the zip file to the current chat, paste the markdown summary, "
-            "and call out high-value invoices plus any failures."
+            "and call out skipped files plus any failures."
         ),
     }
 
@@ -171,8 +118,6 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         payload = args.handler(args)
-    except SetupRequiredError as exc:
-        payload = setup_required_payload(exc.config_path)
     except RuntimeError as exc:
         payload = {"error": str(exc)}
     if args.json:

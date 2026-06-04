@@ -10,6 +10,8 @@ Use this reference when the user asks for a multi-month invoice folder, one merg
 
 ## Canonical Files
 
+- Discover invoice messages in the mailbox web UI, not through a mail protocol sync.
+- Use files downloaded from webmail as the local candidate set.
 - Build the final source folder from representative invoice documents only.
 - Prefer one canonical artifact per `invoice number + amount`.
 - When the same invoice exists in multiple formats, prefer a readable original PDF or image over XML, OFD, or ZIP.
@@ -55,12 +57,12 @@ Use this reference when the user asks for a multi-month invoice folder, one merg
 8. Clean final deliverables so only the current source folder, current merged PDF, and current summary remain in the final export location.
 9. Report the final grand total and monthly totals only, unless the user asks for itemized rows.
 
-## Webmail Reconciliation
+## Webmail Source Of Truth
 
-- If the user points out missing months or messages, do not assume the IMAP sync result is complete.
-- Reconcile against the provider web UI, mailbox search, or message list when available.
+- If the user points out missing months or messages, return to the provider web UI, mailbox search, and visible message list.
+- Do not use mail protocol results as proof of completeness.
 - Search by month boundaries, invoice keywords, senders, and attachment indicators.
-- After finding missed messages, archive them and rebuild the final PDF and totals from the updated source set.
+- After finding missed messages, download the usable invoice files from the web UI, import them, and rebuild the final PDF and totals from the updated source set.
 
 ## Validation Checklist
 

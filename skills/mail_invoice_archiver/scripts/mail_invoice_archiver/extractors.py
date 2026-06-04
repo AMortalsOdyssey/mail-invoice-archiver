@@ -51,8 +51,6 @@ def probable_invoice_message(message: ParsedMessage, config: RuntimeConfig) -> b
     for keyword in config.keyword_denylist:
         if keyword.lower() in haystack:
             score -= 3
-    if config.sender_allowlist and any(sender.lower() in haystack for sender in config.sender_allowlist):
-        score += 3
     for attachment in message.attachments:
         if attachment.extension in config.candidate_extensions:
             score += 2
