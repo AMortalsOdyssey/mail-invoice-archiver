@@ -377,5 +377,16 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(gmail.secret_label, "app password")
 
 
+class CodexWrapperTests(unittest.TestCase):
+    def test_codex_wrapper_uses_bundled_runtime(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        wrapper = repo_root / "codex-skills" / "mail-invoice-archiver"
+        runner = wrapper / "scripts" / "run-mail-invoice-archiver.sh"
+        script = runner.read_text(encoding="utf-8")
+
+        self.assertIn("../runtime/scripts/cli.py", script)
+        self.assertTrue((wrapper / "runtime" / "scripts" / "cli.py").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
