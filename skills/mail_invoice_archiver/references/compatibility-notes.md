@@ -59,7 +59,7 @@ Practical rule:
 During live repair on 2026-04 invoice data, the following issues were reproduced and fixed:
 
 1. Homebrew Python 3.14 loaded `pyexpat` against `/usr/lib/libexpat.1.dylib`, which broke XML parsing. The working recovery path was: repoint the library, then re-sign the touched Python artifacts so macOS would load them again.
-2. PDF vendor extraction initially captured the buyer (`广东天习律师事务所`) instead of the seller. The reliable fix was to switch from plain regex matching to layout-aware extraction that understands the buyer/seller block after `名称： 名称：`.
-3. PDF amount extraction initially captured tax-base amounts such as `232.08` and `198.11` because the generic fallback matched the first `¥` in a reordered text block. The fix was to add a dedicated PDF total extractor that inspects the invoice total area first.
+2. PDF vendor extraction initially captured the buyer instead of the seller. The reliable fix was to switch from plain regex matching to layout-aware extraction that understands the buyer/seller block after `名称： 名称：`.
+3. PDF amount extraction initially captured tax-base or tax amounts because the generic fallback matched the first `¥` in a reordered text block. The fix was to add a dedicated PDF total extractor that inspects the invoice total area first.
 4. Month report totals became unstable when current-month rows were duplicates of older canonical rows created in previous runs. The fix was to summarize by current-month `business_key`, selecting the best representative row from the current month instead of requiring a current-month `saved` row.
-5. One invoice family required an explicit business rule choice for total amount interpretation. When the user confirms a reporting rule such as using `价税合计 = 900.00`, persist that interpretation consistently in extraction and reporting.
+5. One invoice family required an explicit business rule choice for total amount interpretation. When the user confirms a reporting rule such as using `价税合计`, persist that interpretation consistently in extraction and reporting.

@@ -9,6 +9,9 @@ description: Read supported mailbox providers such as 126, 163, and Gmail with a
 
 Use the bundled runtime in `runtime/scripts/cli.py`. This skill keeps one Codex-facing name (`mail-invoice-archiver`) while storing the implementation under its own internal runtime directory.
 
+For multi-month final folders, merged PDFs, monthly totals, or iterative include/exclude edits, also read the bundled final export workflow:
+[runtime/references/final-pdf-export-workflow.md](runtime/references/final-pdf-export-workflow.md).
+
 ## Workflow
 
 1. In the first session after installation, ask the user which mailbox provider and credential storage mode they want before doing anything else.
@@ -49,7 +52,14 @@ set MAIL_INVOICE_ARCHIVER_AUTH_CODE=your-provider-secret
 - Keep invoice metadata in SQLite instead of encoding it into file names.
 - Treat same `invoice number + amount` as one canonical invoice even if multiple emails contain it.
 - If invoice number matches but amount differs, keep the file and report a conflict.
+- For final merged PDFs, include only invoice documents. Exclude hotel folios, water statements, booking vouchers, itinerary-only files, QR-code screenshots, scan-to-issue placeholders, and other non-invoice proofs unless the user explicitly asks to include them.
+- Prefer original readable PDF or image artifacts over XML, OFD, or ZIP for user-facing exports. OFD-derived text or screenshot pages are fallbacks only when no better representation exists.
+- If the user manually removes, restores, or names invoice files or invoice numbers, rebuild the final source folder, merged PDF, and totals together.
+- Final amount summaries default to grand total plus monthly totals rounded to two decimals. Do not list every invoice unless requested.
+- Render-check merged PDFs page by page for blank or placeholder pages before delivery, and keep old/intermediate PDFs out of the final export folder.
+- For XML-backed travel or platform invoices, prefer tax-included total fields such as `TotalTax-includedAmount` or provider-equivalent fields over the first visible PDF amount.
 
 ## References
 
 - Runtime notes: [runtime/references/compatibility-notes.md](runtime/references/compatibility-notes.md)
+- Final PDF export workflow: [runtime/references/final-pdf-export-workflow.md](runtime/references/final-pdf-export-workflow.md)

@@ -15,6 +15,7 @@ metadata: {"openclaw":{"name":"mail_invoice_archiver","displayName":"Mail Invoic
 - Use `python3 {baseDir}/scripts/cli.py sync --month YYYY-MM --json` to pull a month into the local archive.
 - Use `python3 {baseDir}/scripts/cli.py report --month YYYY-MM --json` to inspect totals, duplicates, conflicts, and failures.
 - Use `python3 {baseDir}/scripts/cli.py deliver --month YYYY-MM --json` to prepare a zip plus summary for the current chat.
+- For multi-month final folders, merged PDFs, monthly totals, or user-driven include/exclude edits, read [references/final-pdf-export-workflow.md](references/final-pdf-export-workflow.md) before packaging.
 
 ## Workflow
 
@@ -30,6 +31,7 @@ metadata: {"openclaw":{"name":"mail_invoice_archiver","displayName":"Mail Invoic
 7. Run `report --month YYYY-MM --json` after sync and summarize:
    total amount, canonical invoice count, high-value invoices, duplicates, conflicts, and failures.
 8. Run `deliver --month YYYY-MM --json`, then attach the returned zip file in the current chat and paste the summary.
+9. If the user asks for a final merged PDF or later changes the include/exclude set, rebuild the candidate set, merged PDF, and totals together. Do not update one without revalidating the others.
 
 ## Windows Env Setup
 
@@ -65,8 +67,14 @@ python "{baseDir}\scripts\cli.py" doctor --json
 - If a link download fails and the message still looks like an invoice, report that failure back to the user.
 - When the same invoice appears in multiple attachment formats in one mail, prefer user-friendly formats for the canonical saved file. Default priority should be: **image (png/jpg/jpeg) or PDF first**, then XML, then OFD, and ZIP last. Do not prefer OFD or ZIP when a readable PDF or image version of the same invoice is available.
 - Treat OFD as a fallback archival format, not the default user-facing format, unless it is the only available canonical representation.
+- For final merged PDFs, exclude non-invoice proofs such as hotel folios, water statements, booking vouchers, itinerary-only documents, QR-code screenshots, and scan-to-issue placeholders unless the user explicitly asks to include them.
+- Final amount summaries should default to grand total plus monthly totals rounded to two decimals. Do not list every invoice unless the user requests itemized detail.
+- When a user manually removes, restores, or names files or invoice numbers to include/exclude, apply that same change to both the merged PDF and totals, then rebuild and recheck the final artifacts.
+- Render the final merged PDF page by page to detect blank or placeholder pages. Do not rely only on page count or text extraction.
+- Keep old, backup, and intermediate merged PDFs out of the final export folder so the user opens the current version.
 - For PDF invoice amount extraction, do not blindly take the first `¥` amount. PDF text extraction may reorder the invoice area and expose tax base amount, tax amount, and total amount in the wrong sequence.
 - For PDF invoices, prefer a dedicated total-amount extractor over generic regex fallback. Use the invoice total area first, then fall back only when that area is missing.
+- For XML-backed travel or platform invoices, prefer tax-included total fields such as `TotalTax-includedAmount` or provider-equivalent fields over the first visible amount in rendered PDF text.
 - Buyer and seller names in PDF invoices may collapse into repeated `名称： 名称：` layouts after text extraction. Prefer layout-aware extraction over a single regex when distinguishing buyer and seller.
 - Month summaries must be stable even when a current-month row is marked as `duplicate` against an older canonical row outside the month window. Summaries should aggregate by current-month business keys, not only by `status='saved'` rows inside the month.
 - If the user specifies a business rule for a specific invoice family, such as using `价税合计` for totals, record and honor that rule consistently in later extraction and reporting.
@@ -75,6 +83,7 @@ python "{baseDir}\scripts\cli.py" doctor --json
 
 - Runtime: [scripts/cli.py](scripts/cli.py)
 - Detailed findings and pitfalls: [references/compatibility-notes.md](references/compatibility-notes.md)
+- Final PDF export workflow: [references/final-pdf-export-workflow.md](references/final-pdf-export-workflow.md)
 - Feishu local config example: [config/feishu/config.example.yaml](config/feishu/config.example.yaml)
 
 ## Local Secret Config Convention

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 import unittest
@@ -11,7 +12,10 @@ from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.auth import (
     resolve_credentials,
     setup_required_payload,
 )
-from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.archive import sanitize_filename
+from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.archive import (
+    _select_best_attachments_for_message,
+    sanitize_filename,
+)
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.config import RuntimeConfig
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.providers import (
     default_system_service_name,
@@ -21,25 +25,30 @@ from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.providers import
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.extractors import (
     amount_to_cents,
     extract_from_text,
+    extract_from_xml,
     extract_pdf_invoice_total,
     infer_business_key,
 )
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.feishu_delivery import load_feishu_config
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.index import ArchiveIndex
-from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.models import InvoiceMetadata
+from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.models import (
+    AttachmentPayload,
+    InvoiceMetadata,
+    ParsedMessage,
+)
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.setup_wizard import run_setup
 
 
 class ExtractorTests(unittest.TestCase):
     def test_extract_from_text(self) -> None:
         text = (
-            "发票号码：26442000003702874156 开票日期：2026/4/5 "
-            "合计金额：￥246 开票方：广州宝园阁餐饮有限公司"
+            "发票号码：12345678901234567890 开票日期：2026/4/5 "
+            "合计金额：￥100.00 开票方：示例乙方有限公司"
         )
         metadata = extract_from_text(text, source="unit-test")
-        self.assertEqual(metadata.invoice_number, "26442000003702874156")
-        self.assertEqual(metadata.amount_cents, 24600)
-        self.assertEqual(metadata.vendor, "广州宝园阁餐饮有限公司")
+        self.assertEqual(metadata.invoice_number, "12345678901234567890")
+        self.assertEqual(metadata.amount_cents, 10000)
+        self.assertEqual(metadata.vendor, "示例乙方有限公司")
 
     def test_amount_to_cents(self) -> None:
         self.assertEqual(amount_to_cents("213.00"), 21300)
@@ -49,21 +58,34 @@ class ExtractorTests(unittest.TestCase):
     def test_extract_vendor_from_collapsed_layout(self) -> None:
         text = (
             "名称： 名称：\n"
-            "广东天习律师事务所\n"
+            "示例甲方有限公司\n"
             "91440101ABCDEFG12\n"
-            "广州宝园阁餐饮有限公司\n"
+            "示例乙方有限公司\n"
             "91440101HIJKLMN34\n"
         )
         metadata = extract_from_text(text, source="unit-test")
-        self.assertEqual(metadata.vendor, "广州宝园阁餐饮有限公司")
+        self.assertEqual(metadata.vendor, "示例乙方有限公司")
 
     def test_extract_pdf_invoice_total_prefers_total_area(self) -> None:
         text = (
-            "项目 A ¥232.08 税额 ¥13.92 "
-            "价税合计（小写） ¥246.00 "
+            "项目 A ¥80.00 税额 ¥20.00 "
+            "价税合计（小写） ¥100.00 "
             "其他字段"
         )
-        self.assertEqual(extract_pdf_invoice_total(text), 24600)
+        self.assertEqual(extract_pdf_invoice_total(text), 10000)
+
+    def test_extract_xml_prefers_tax_included_total(self) -> None:
+        xml = b"""<?xml version="1.0" encoding="UTF-8"?>
+        <Invoice>
+          <InvoiceNumber>12345678901234567890</InvoiceNumber>
+          <TaxAmount>12.34</TaxAmount>
+          <TotalTax-includedAmount>345.67</TotalTax-includedAmount>
+        </Invoice>
+        """
+        metadata = extract_from_xml(xml)
+        self.assertEqual(metadata.invoice_number, "12345678901234567890")
+        self.assertEqual(metadata.amount_cents, 34567)
+        self.assertIn("xml-tax-included-total", metadata.extraction_sources)
 
     def test_business_key_prefers_invoice_number_and_amount(self) -> None:
         metadata = InvoiceMetadata(invoice_number="1234567890", amount_cents=5000)
@@ -74,6 +96,48 @@ class ExtractorTests(unittest.TestCase):
 
     def test_sanitize_filename(self) -> None:
         self.assertEqual(sanitize_filename("发票/测试?.pdf"), "发票_测试_.pdf")
+
+
+class ArchiveSelectionTests(unittest.TestCase):
+    def test_prefers_pdf_over_ofd_for_same_invoice(self) -> None:
+        try:
+            from pypdf import PdfWriter
+        except Exception:
+            self.skipTest("pypdf is unavailable")
+        pdf_buffer = io.BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        writer.write(pdf_buffer)
+
+        message = ParsedMessage(
+            uid="1",
+            account="demo@example.com",
+            folder="INBOX",
+            received_at=None,
+            sender="Invoice Platform",
+            subject="电子发票",
+            preview="发票号码：12345678901234567890 金额：100.00",
+            body_text="",
+            attachments=[],
+        )
+        attachments = [
+            AttachmentPayload(
+                part_ref="part-0",
+                filename="invoice.ofd",
+                content_type="application/octet-stream",
+                data=b"not-a-real-ofd",
+            ),
+            AttachmentPayload(
+                part_ref="part-1",
+                filename="invoice.pdf",
+                content_type="application/pdf",
+                data=pdf_buffer.getvalue(),
+            ),
+        ]
+
+        selected = _select_best_attachments_for_message(message, attachments)
+
+        self.assertEqual([attachment.filename for attachment in selected], ["invoice.pdf"])
 
 
 class IndexTests(unittest.TestCase):

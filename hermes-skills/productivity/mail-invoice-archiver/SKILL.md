@@ -15,6 +15,9 @@ tags: [email, invoice, finance, automation]
 
 Use the shared runtime in `../../../skills/mail_invoice_archiver/scripts/cli.py` to inspect invoice mail, archive invoices, and prepare monthly bundles for the current chat.
 
+For multi-month final folders, merged PDFs, monthly totals, or iterative include/exclude edits, also read the shared final export workflow:
+[../../../skills/mail_invoice_archiver/references/final-pdf-export-workflow.md](../../../skills/mail_invoice_archiver/references/final-pdf-export-workflow.md).
+
 ## Commands
 
 - `bash scripts/run-mail-invoice-archiver.sh setup --provider system|env|config|prompt --json`
@@ -52,4 +55,10 @@ set MAIL_INVOICE_ARCHIVER_AUTH_CODE=your-provider-secret
 - Gmail currently requires an app password in this runtime for personal Gmail accounts. Some Google Workspace tenants may still require admin-side IMAP changes or OAuth, which is not implemented yet.
 - Use business dedupe by `invoice number + amount`.
 - Keep conflicts when invoice number matches but amount differs, and surface them in the report.
+- For final merged PDFs, include only invoice documents. Exclude hotel folios, water statements, booking vouchers, itinerary-only files, QR-code screenshots, scan-to-issue placeholders, and other non-invoice proofs unless explicitly requested.
+- Prefer original readable PDF or image artifacts over XML, OFD, or ZIP for user-facing exports. OFD-derived text or screenshot pages are fallbacks only when no better representation exists.
+- If the user manually removes, restores, or names invoice files or invoice numbers, rebuild the final source folder, merged PDF, and totals together.
+- Final amount summaries default to grand total plus monthly totals rounded to two decimals. Do not list every invoice unless requested.
+- Render-check merged PDFs page by page for blank or placeholder pages before delivery, and keep old/intermediate PDFs out of the final export folder.
+- For XML-backed travel or platform invoices, prefer tax-included total fields such as `TotalTax-includedAmount` or provider-equivalent fields over the first visible PDF amount.
 - After `deliver`, attach the returned zip file to the current Hermes conversation and include the generated summary.

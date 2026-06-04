@@ -167,6 +167,14 @@ python skills/mail_invoice_archiver/scripts/cli.py deliver --month 2026-04 --jso
   image (`png` / `jpg` / `jpeg`), then `pdf`, then `xml`, then `ofd`, and `zip` last.
 - OFD is treated as a fallback archival format. If a readable PDF can be derived or is already present, the runtime avoids making OFD the default saved artifact.
 - PDF extraction now prefers the invoice total area over the first visible currency value, and falls back to OCR when direct text extraction is not reliable and OCR tooling is available.
+- XML-backed travel or platform invoices should use tax-included total fields, such as `TotalTax-includedAmount`, before falling back to rendered PDF text amounts.
+
+## Final PDF Exports
+
+- See `skills/mail_invoice_archiver/references/final-pdf-export-workflow.md` for the privacy-safe workflow used when a user asks for multi-month source folders, one merged PDF, monthly totals, and iterative include/exclude edits.
+- The Codex-installed copy of the same workflow lives at `codex-skills/mail-invoice-archiver/runtime/references/final-pdf-export-workflow.md`.
+- Final export summaries default to a grand total plus monthly totals rounded to two decimals, without itemized invoice rows unless requested.
+- Final merged PDFs should contain invoice documents only, use one representative artifact per `invoice number + amount`, prefer readable PDFs or images over OFD/ZIP fallbacks, and be rendered page by page to catch blank or placeholder pages.
 
 ## Optional Feishu Delivery Helper
 

@@ -161,13 +161,37 @@ def _extract_vendor_from_invoice_layout(text: str) -> str | None:
 
 
 def extract_from_xml(data: bytes) -> InvoiceMetadata:
-    metadata = InvoiceMetadata(confidence="high", extraction_sources=["xml"])
     try:
         root = ET.fromstring(data)
         text = " ".join((element.text or "") for element in root.iter())
     except ET.ParseError:
         return InvoiceMetadata(extraction_sources=["xml-parse-failed"])
-    return extract_from_text(text, source="xml")
+    metadata = extract_from_text(text, source="xml")
+    total_tax_included = _extract_xml_tax_included_total(root)
+    if total_tax_included is not None:
+        metadata.amount_cents = total_tax_included
+        metadata.extraction_sources.append("xml-tax-included-total")
+    if metadata.invoice_number or metadata.amount_cents is not None:
+        metadata.confidence = "high"
+    return metadata
+
+
+def _extract_xml_tax_included_total(root: ET.Element) -> int | None:
+    preferred_names = {
+        "totaltaxincludedamount",
+        "totaltaxinclusiveamount",
+        "taxincludedamount",
+        "taxinclusiveamount",
+    }
+    for element in root.iter():
+        local_name = str(element.tag).rsplit("}", 1)[-1]
+        normalized = re.sub(r"[-_\s]", "", local_name).lower()
+        if normalized not in preferred_names:
+            continue
+        amount = amount_to_cents(element.text)
+        if amount is not None:
+            return amount
+    return None
 
 
 def extract_from_pdf(data: bytes) -> InvoiceMetadata:
