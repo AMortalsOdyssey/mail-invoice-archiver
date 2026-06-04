@@ -66,7 +66,8 @@ python "{baseDir}\scripts\cli.py" doctor --json
 - Keep invoice amount and OCR results in SQLite metadata, not in file names.
 - If a link download fails and the message still looks like an invoice, report that failure back to the user.
 - When the same invoice appears in multiple attachment formats in one mail, prefer user-friendly formats for the canonical saved file. Default priority should be: **image (png/jpg/jpeg) or PDF first**, then XML, then OFD, and ZIP last. Do not prefer OFD or ZIP when a readable PDF or image version of the same invoice is available.
-- Treat OFD as a fallback archival format, not the default user-facing format, unless it is the only available canonical representation.
+- Treat OFD as a raw archive clue only. For final user-facing exports, do not include OFD-only candidates in the source folder, merged PDF, or totals; list them as skipped because no usable PDF invoice was available.
+- Never force OFD-derived text pages, screenshots, placeholder pages, or conversions into the final merged PDF.
 - For final merged PDFs, exclude non-invoice proofs such as hotel folios, water statements, booking vouchers, itinerary-only documents, QR-code screenshots, and scan-to-issue placeholders unless the user explicitly asks to include them.
 - Final amount summaries should default to grand total plus monthly totals rounded to two decimals. Do not list every invoice unless the user requests itemized detail.
 - When a user manually removes, restores, or names files or invoice numbers to include/exclude, apply that same change to both the merged PDF and totals, then rebuild and recheck the final artifacts.

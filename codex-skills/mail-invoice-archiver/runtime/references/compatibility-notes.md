@@ -9,7 +9,7 @@ A real-world invoice mail may include the same invoice in several attachment for
 - ZIP
 - sometimes image attachments
 
-For user-facing archive output, OFD is often the least convenient option because many users do not routinely open, print, or inspect OFD files. In this workflow, canonical file selection should prefer formats the user can open immediately.
+For user-facing archive output, OFD is often not useful because many users do not routinely open, print, or inspect OFD files. In this workflow, canonical file selection should prefer formats the user can open immediately.
 
 Recommended priority for canonical saved artifacts:
 
@@ -22,8 +22,9 @@ Recommended priority for canonical saved artifacts:
 Practical rule:
 
 - If PDF or image exists for the same invoice, do not save OFD as the default canonical artifact.
-- Keep OFD or ZIP only as fallback or supplemental material when no more accessible format exists.
-- This preference is about user-facing archive convenience, not about extraction confidence alone.
+- For final merged PDF exports, skip OFD-only candidates from the final source folder, merged PDF, and totals.
+- List OFD-only candidates as skipped because no usable PDF invoice was available. Raw archive retention is fine for traceability, but it must not leak into the final PDF.
+- This preference is about user-facing archive convenience and final export usability, not about extraction confidence alone.
 
 ## Real-World Findings
 

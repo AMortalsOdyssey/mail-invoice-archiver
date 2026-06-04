@@ -53,7 +53,8 @@ set MAIL_INVOICE_ARCHIVER_AUTH_CODE=your-provider-secret
 - Treat same `invoice number + amount` as one canonical invoice even if multiple emails contain it.
 - If invoice number matches but amount differs, keep the file and report a conflict.
 - For final merged PDFs, include only invoice documents. Exclude hotel folios, water statements, booking vouchers, itinerary-only files, QR-code screenshots, scan-to-issue placeholders, and other non-invoice proofs unless the user explicitly asks to include them.
-- Prefer original readable PDF or image artifacts over XML, OFD, or ZIP for user-facing exports. OFD-derived text or screenshot pages are fallbacks only when no better representation exists.
+- Prefer original readable PDF or image artifacts over XML, OFD, or ZIP for user-facing exports. OFD-only candidates must be skipped from the final source folder, merged PDF, and totals, then listed as skipped because no usable PDF invoice was available.
+- Never force OFD-derived text pages, screenshots, placeholder pages, or conversions into the final merged PDF.
 - If the user manually removes, restores, or names invoice files or invoice numbers, rebuild the final source folder, merged PDF, and totals together.
 - Final amount summaries default to grand total plus monthly totals rounded to two decimals. Do not list every invoice unless requested.
 - Render-check merged PDFs page by page for blank or placeholder pages before delivery, and keep old/intermediate PDFs out of the final export folder.
