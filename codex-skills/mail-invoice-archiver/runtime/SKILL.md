@@ -32,6 +32,20 @@ metadata: {"openclaw":{"name":"mail_invoice_archiver","displayName":"Mail Invoic
 6. Import that folder with `import-files`, then rebuild report, package, and final merged PDF from the imported set.
 7. If the user changes include/exclude decisions, rebuild the candidate set, totals, and merged PDF together.
 
+When the browser tool can evaluate JavaScript in the logged-in tab, prefer
+[references/webmail-api-collection.md](references/webmail-api-collection.md) over paging the
+UI by hand: it drives the mailbox's own authenticated endpoints for listing, attachment
+metadata, and attachment bytes, and it covers range-completeness checks, the Chrome
+multi-file download block, template decoration images, and link-only invoices. The web UI
+remains the source of truth; only the reading method changes.
+
+## Amount Accuracy
+
+- Cross-check every monthly total against a second signal before reporting it: 价税合计（大写）
+  from the PDF, or the amount declared in the mail subject.
+- Watch for PDFs whose text layer spaces every glyph (`¥ 9 5 0 . 0 0`). See the amount
+  extraction section of [references/compatibility-notes.md](references/compatibility-notes.md).
+
 ## Final Export Rules
 
 - Final merged PDFs must contain usable invoice PDF or image documents only.

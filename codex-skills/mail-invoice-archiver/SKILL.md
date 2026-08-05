@@ -16,6 +16,9 @@ For multi-month final folders, merged PDFs, monthly totals, or iterative include
 
 1. Open the user's authenticated mailbox web UI in Chrome or the available browser.
 2. Search each requested month explicitly with webmail date filters, full-text search, attachment filters, and visible pagination.
+   When the browser tool can evaluate JavaScript in the logged-in tab, prefer
+   [runtime/references/webmail-api-collection.md](runtime/references/webmail-api-collection.md)
+   over paging by hand.
 3. Download original usable invoice PDF or image files into a local month source folder.
 4. Run `bash scripts/run-mail-invoice-archiver.sh doctor --json`.
 5. Run `bash scripts/run-mail-invoice-archiver.sh checklist --from-month YYYY-MM --to-month YYYY-MM --json` when you need the browser search checklist.
@@ -35,8 +38,10 @@ For multi-month final folders, merged PDFs, monthly totals, or iterative include
 - Use XML only as an amount extraction aid when a usable PDF/image invoice is present; prefer tax-included total fields such as `TotalTax-includedAmount`.
 - Final amount summaries default to grand total plus monthly totals rounded to two decimals. Do not list every invoice unless requested.
 - Render-check merged PDFs page by page for blank or placeholder pages before delivery.
+- Cross-check every monthly total against 价税合计（大写） or the amount declared in the mail subject before reporting it. Some PDFs space every glyph (`¥ 9 5 0 . 0 0`), which silently truncates the amount.
 
 ## References
 
 - Runtime notes: [runtime/references/compatibility-notes.md](runtime/references/compatibility-notes.md)
+- Webmail API collection: [runtime/references/webmail-api-collection.md](runtime/references/webmail-api-collection.md)
 - Final PDF export workflow: [runtime/references/final-pdf-export-workflow.md](runtime/references/final-pdf-export-workflow.md)

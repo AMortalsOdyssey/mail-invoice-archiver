@@ -202,15 +202,74 @@ def extract_from_pdf(data: bytes) -> InvoiceMetadata:
         text = " ".join(page.extract_text() or "" for page in reader.pages)
     except Exception:
         return InvoiceMetadata(extraction_sources=["pdf-read-failed"])
+    text = join_spaced_digits(text)
     metadata = extract_from_text(text, source="pdf-text")
     pdf_amount = extract_pdf_invoice_total(text)
     if pdf_amount is not None:
         metadata.amount_cents = pdf_amount
+    cn_amount = extract_chinese_uppercase_total(text)
+    if cn_amount is not None and cn_amount != metadata.amount_cents:
+        metadata.amount_cents = cn_amount
+        metadata.extraction_sources.append("pdf-chinese-uppercase-total")
     if metadata.invoice_number or metadata.amount_cents is not None:
         metadata.confidence = "high"
         return metadata
     ocr_metadata = extract_pdf_via_ocr(data)
     return ocr_metadata.merge(metadata)
+
+
+def join_spaced_digits(text: str) -> str:
+    """Collapse per-character spacing in numbers.
+
+    Some invoice PDFs lay out every glyph separately, so the text layer reads
+    ``¥ 9 5 0 . 0 0`` and ``2 6 4 4 2 ...`` instead of ``¥950.00`` / ``26442...``.
+    Left as-is, the amount and invoice-number patterns match only the first
+    digit and silently report a wrong amount. Only rewrite when the document
+    actually shows that spacing (4+ single digits in a row), so ordinary tables
+    that merely separate two numbers with a space are left untouched.
+    """
+    if not re.search(r'\d(?:[ \t][\d.]){3,}', text):
+        return text
+    collapsed = re.sub(r'(?<=\d)[ \t]+(?=[\d.])', '', text)
+    return re.sub(r'(?<=\.)[ \t]+(?=\d)', '', collapsed)
+
+
+CN_DIGITS = {'零': 0, '壹': 1, '贰': 2, '叁': 3, '肆': 4, '伍': 5, '陆': 6, '柒': 7, '捌': 8, '玖': 9}
+CN_UNITS = {'拾': 10, '佰': 100, '仟': 1000}
+CN_TOTAL_PATTERN = re.compile(r'[零壹贰叁肆伍陆柒捌玖拾佰仟万]{2,}[圆元](?:整|[零壹贰叁肆伍陆柒捌玖]角(?:[零壹贰叁肆伍陆柒捌玖]分)?)')
+
+
+def extract_chinese_uppercase_total(text: str) -> int | None:
+    """Read 价税合计（大写）, e.g. 玖佰伍拾圆整 -> 95000 cents.
+
+    The uppercase total is written in Chinese characters, so it survives the
+    digit-spacing and OCR problems that corrupt the numeric ``¥`` fields. Used
+    as the authority when it disagrees with the digits.
+    """
+    match = CN_TOTAL_PATTERN.search(re.sub(r'[ \t]+', '', text))
+    if not match:
+        return None
+    body = match.group(0)
+    yuan_part, _, fraction_part = body.replace('圆', '元').partition('元')
+    total = section = current = 0
+    for ch in yuan_part:
+        if ch in CN_DIGITS:
+            current = CN_DIGITS[ch]
+        elif ch in CN_UNITS:
+            section += (current or 1) * CN_UNITS[ch]
+            current = 0
+        elif ch == '万':
+            section = (section + current) * 10000
+            total += section
+            section = current = 0
+    cents = (total + section + current) * 100
+    jiao = re.search(r'([零壹贰叁肆伍陆柒捌玖])角', fraction_part)
+    fen = re.search(r'([零壹贰叁肆伍陆柒捌玖])分', fraction_part)
+    if jiao:
+        cents += CN_DIGITS[jiao.group(1)] * 10
+    if fen:
+        cents += CN_DIGITS[fen.group(1)]
+    return cents or None
 
 
 def extract_pdf_invoice_total(text: str) -> int | None:
@@ -270,7 +329,7 @@ def extract_pdf_via_ocr(data: bytes) -> InvoiceMetadata:
         input_path.write_bytes(data)
         try:
             subprocess.run(
-                [ocrmypdf, "--skip-text", "--force-ocr", str(input_path), str(output_path)],
+                [ocrmypdf, "--force-ocr", "-l", "chi_sim+eng", str(input_path), str(output_path)],
                 check=True,
                 capture_output=True,
                 text=True,

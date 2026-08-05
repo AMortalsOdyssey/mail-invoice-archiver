@@ -30,6 +30,17 @@
 - Prefer invoice total areas such as `价税合计`.
 - For XML-backed travel or platform invoices, use XML only as an amount extraction aid when a usable PDF/image invoice is present.
 - Prefer tax-included total fields such as `TotalTax-includedAmount` or provider-equivalent names.
+- **Some PDFs space every glyph**, so the text layer reads `¥ 9 5 0 . 0 0` and
+  `2 6 4 4 …` instead of `¥950.00` and `26442…`. Untreated, the amount pattern matches only
+  the first digit and reports `9.00` for a 950.00 invoice — wrong, and silent. The runtime
+  now collapses that spacing (`join_spaced_digits`) before matching, gated on the document
+  actually showing it so ordinary tables are untouched.
+- **价税合计（大写） is the tiebreaker.** The Chinese uppercase total survives glyph spacing
+  and OCR damage that corrupt the `¥` fields, so `extract_chinese_uppercase_total` overrides
+  the digits when the two disagree, and the override is recorded as
+  `pdf-chinese-uppercase-total` in `extraction_sources`.
+- Never report a monthly total that has not been cross-checked against a second signal —
+  the uppercase total, or the amount declared in the mail subject.
 
 ## Reporting
 

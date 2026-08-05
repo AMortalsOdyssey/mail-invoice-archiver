@@ -82,6 +82,32 @@ python3 skills/mail_invoice_archiver/scripts/cli.py pack --month 2026-04 --json
 python3 skills/mail_invoice_archiver/scripts/cli.py deliver --month 2026-04 --json
 ```
 
+## Collecting From The Mailbox
+
+The runtime does not talk to the mailbox. Collection happens in the browser, and there are
+two ways to do it:
+
+- **By hand in the UI** — search per month, open candidates, download attachments.
+- **Through the mailbox's own endpoints** — when the browser tool can evaluate JavaScript in
+  the logged-in tab, drive the provider's authenticated list/read/part APIs from inside the
+  page. Faster, and it makes range-completeness checkable. See
+  `skills/mail_invoice_archiver/references/webmail-api-collection.md`.
+
+Either way the web UI stays the source of truth, the user logs in manually, and session ids
+and tokens are never copied out of the browser or written to disk.
+
+## Amount Accuracy
+
+Amounts are cross-checked, not taken from the first `¥` in the text:
+
+- `join_spaced_digits` repairs PDFs whose text layer spaces every glyph (`¥ 9 5 0 . 0 0`),
+  which would otherwise silently report `9.00` for a 950.00 invoice.
+- `extract_chinese_uppercase_total` reads 价税合计（大写） and overrides the digits when the
+  two disagree, recording `pdf-chinese-uppercase-total` in `extraction_sources`.
+
+Do not report a monthly total that has not been cross-checked against a second signal —
+the uppercase total, or the amount declared in the mail subject.
+
 ## Final PDF Exports
 
 - See `skills/mail_invoice_archiver/references/final-pdf-export-workflow.md` for the privacy-safe final export workflow.

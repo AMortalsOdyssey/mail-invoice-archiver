@@ -15,10 +15,12 @@ from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.archive import (
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.config import RuntimeConfig
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.extractors import (
     amount_to_cents,
+    extract_chinese_uppercase_total,
     extract_from_text,
     extract_from_xml,
     extract_pdf_invoice_total,
     infer_business_key,
+    join_spaced_digits,
 )
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.feishu_delivery import load_feishu_config
 from skills.mail_invoice_archiver.scripts.mail_invoice_archiver.index import ArchiveIndex
@@ -72,6 +74,38 @@ class ExtractorTests(unittest.TestCase):
         self.assertEqual(metadata.invoice_number, "12345678901234567890")
         self.assertEqual(metadata.amount_cents, 34567)
         self.assertIn("xml-tax-included-total", metadata.extraction_sources)
+
+    def test_join_spaced_digits_repairs_per_glyph_layout(self) -> None:
+        text = "发票号码 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 价税合计（小写） ¥ 9 5 0 . 0 0"
+        repaired = join_spaced_digits(text)
+        self.assertIn("12345678901234567890", repaired)
+        self.assertEqual(extract_pdf_invoice_total(repaired), 95000)
+
+    def test_join_spaced_digits_leaves_normal_text_alone(self) -> None:
+        # Two independent numbers separated by a space must not be glued together.
+        for text in ["1 950.00 2 100.00", "金额 100.00 税率 3", "合计 3 项 共 2 笔"]:
+            self.assertEqual(join_spaced_digits(text), text)
+
+    def test_chinese_uppercase_total(self) -> None:
+        cases = {
+            "价税合计（大写） 玖佰伍拾圆整": 95000,
+            "价税合计（大写） 贰仟伍佰玖拾捌圆整": 259800,
+            "价税合计（大写） 壹仟壹佰零肆圆整": 110400,
+            "价税合计（大写） 叁佰捌拾伍圆贰角": 38520,
+            "价税合计（大写） 壹万贰仟叁佰肆拾伍圆陆角柒分": 1234567,
+            "价税合计（大写） 玖 佰 伍 拾 圆 整": 95000,
+        }
+        for text, cents in cases.items():
+            self.assertEqual(extract_chinese_uppercase_total(text), cents, text)
+        self.assertIsNone(extract_chinese_uppercase_total("没有大写金额"))
+
+    def test_extract_from_pdf_prefers_uppercase_when_digits_are_split(self) -> None:
+        # Mirrors a real invoice whose text layer spaces every glyph, which made
+        # the ¥ pattern stop at the first digit and report 9.00 instead of 950.00.
+        text = "¥ 9 4 0 . 5 9 ¥ 9 . 4 1 价税合计（大写） 玖佰伍拾圆整 （小写） ¥ 9 5 0 . 0 0"
+        repaired = join_spaced_digits(text)
+        self.assertEqual(extract_pdf_invoice_total(repaired), 95000)
+        self.assertEqual(extract_chinese_uppercase_total(repaired), 95000)
 
     def test_business_key_prefers_invoice_number_and_amount(self) -> None:
         metadata = InvoiceMetadata(invoice_number="1234567890", amount_cents=5000)
